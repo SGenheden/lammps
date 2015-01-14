@@ -44,7 +44,7 @@ using namespace LAMMPS_NS;
 
 // also in reader_native.cpp
 
-enum{ID,TYPE,X,Y,Z,VX,VY,VZ,Q,IX,IY,IZ};
+enum{ID,TYPE,X,Y,Z,VX,VY,VZ,Q,IX,IY,IZ,MUX,MUY,MUZ};
 enum{UNSET,NOSCALE_NOWRAP,NOSCALE_WRAP,SCALE_NOWRAP,SCALE_WRAP};
 
 /* ---------------------------------------------------------------------- */
@@ -713,6 +713,9 @@ int ReadDump::whichtype(char *str)
   else if (strcmp(str,"ix") == 0) type = IX;
   else if (strcmp(str,"iy") == 0) type = IY;
   else if (strcmp(str,"iz") == 0) type = IZ;
+  else if (strcmp(str,"mux") == 0) type = MUX;
+  else if (strcmp(str,"muy") == 0) type = MUY;
+  else if (strcmp(str,"muz") == 0) type = MUZ;
   return type;
 }
 
@@ -735,6 +738,7 @@ void ReadDump::process_atoms(int n)
   double **x = atom->x;
   double **v = atom->v;
   double *q = atom->q;
+  double **mu = atom->mu;
   imageint *image = atom->image;
   int nlocal = atom->nlocal;
   tagint map_tag_max = atom->map_tag_max;
@@ -789,6 +793,15 @@ void ReadDump::process_atoms(int n)
           break;
         case VZ:
           v[m][2] = fields[i][ifield];
+          break;
+        case MUX:
+          mu[m][0] = fields[i][ifield];
+          break;
+        case MUY:
+          mu[m][1] = fields[i][ifield];
+          break;
+        case MUZ:
+          mu[m][2] = fields[i][ifield];
           break;
         case IX:
           xbox = static_cast<int> (fields[i][ifield]);
@@ -878,6 +891,15 @@ void ReadDump::process_atoms(int n)
         break;
       case VZ:
         v[m][2] = fields[i][ifield];
+        break;
+      case MUX:
+        mu[m][0] = fields[i][ifield];
+        break;
+      case MUY:
+        mu[m][1] = fields[i][ifield];
+        break;
+      case MUZ:
+        mu[m][2] = fields[i][ifield];
         break;
       case Q:
         q[m] = fields[i][ifield];

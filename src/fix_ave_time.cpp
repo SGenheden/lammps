@@ -634,7 +634,7 @@ void FixAveTime::invoke_scalar(bigint ntimestep)
   if (fp && me == 0) {
     if (overwrite) fseek(fp,filepos,SEEK_SET);
     fprintf(fp,BIGINT_FORMAT,ntimestep);
-    for (i = 0; i < nvalues; i++) fprintf(fp," %g",vector_total[i]/norm);
+    for (i = 0; i < nvalues; i++) fprintf(fp," %.8f",vector_total[i]/norm);
     fprintf(fp,"\n");
     fflush(fp);
     if (overwrite) {
@@ -779,7 +779,7 @@ void FixAveTime::invoke_vector(bigint ntimestep)
     fprintf(fp,BIGINT_FORMAT " %d\n",ntimestep,nrows);
     for (i = 0; i < nrows; i++) {
       fprintf(fp,"%d",i+1);
-      for (j = 0; j < nvalues; j++) fprintf(fp," %g",array_total[i][j]/norm);
+      for (j = 0; j < nvalues; j++) fprintf(fp," %.8f",array_total[i][j]/norm);
       fprintf(fp,"\n");
     }
     fflush(fp);

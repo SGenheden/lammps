@@ -36,11 +36,13 @@ class FixAdapt : public Fix {
   void init();
   void setup_pre_force(int);
   void pre_force(int);
+  void pre_force_respa(int, int, int);
   void post_run();
 
  private:
   int nadapt,resetflag,scaleflag;
   int anypair;
+  int nlevels_respa;
   char *id_fix_diam,*id_fix_chg;
   class FixStore *fix_diam,*fix_chg;
 

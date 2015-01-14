@@ -29,6 +29,7 @@
 #include "math_const.h"
 #include "memory.h"
 #include "error.h"
+#include "respa.h"
 
 using namespace LAMMPS_NS;
 using namespace FixConst;
@@ -190,6 +191,7 @@ int FixAdapt::setmask()
 {
   int mask = 0;
   mask |= PRE_FORCE;
+  mask |= PRE_FORCE_RESPA;
   mask |= POST_RUN;
   return mask;
 }
@@ -368,6 +370,10 @@ void FixAdapt::init()
     if (ifix < 0) error->all(FLERR,"Could not find fix adapt storage fix ID");
     fix_chg = (FixStore *) modify->fix[ifix];
   }
+
+  if (strstr(update->integrate_style,"respa")) {
+    nlevels_respa = ((Respa *) update->integrate)->nlevels;
+  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -375,6 +381,14 @@ void FixAdapt::init()
 void FixAdapt::setup_pre_force(int vflag)
 {
   change_settings();
+}
+
+/* ---------------------------------------------------------------------- */
+
+void FixAdapt::pre_force_respa(int vflag, int ilevel, int iloop)
+{
+  // Only change at outmost level
+  if (ilevel == nlevels_respa-1) change_settings();
 }
 
 /* ---------------------------------------------------------------------- */

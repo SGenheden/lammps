@@ -7,6 +7,7 @@
 #include "random_park.h"
 
 #include "fix_colvars.h"
+#include "respa.h"
 
 #include "colvarmodule.h"
 #include "colvaratoms.h"
@@ -122,6 +123,14 @@ void colvarproxy_lammps::init(const char *conf_file)
   // create the colvarmodule instance
   colvars = new colvarmodule(this);
 
+  if (strstr(_lmp->update->integrate_style,"respa")) {
+    timestep_factor = ((LAMMPS_NS::Respa *) _lmp->update->integrate)->loop[0];
+  } else {
+    timestep_factor = 1;
+  }
+  timestep_small = 0;
+
+
   cvm::log("Using LAMMPS interface, version "+
             cvm::to_str(COLVARPROXY_VERSION)+".\n");
 
@@ -165,17 +174,20 @@ void colvarproxy_lammps::setup()
 double colvarproxy_lammps::compute()
 {
   if (first_timestep) {
-    first_timestep = false;
+	first_timestep = false;
+	previous_step = 0;
   } else {
-    // Use the time step number inherited from LAMMPS
-    if ( _lmp->update->ntimestep - previous_step == 1 )
-      colvars->it++;
-    // Other cases could mean:
-    // - run 0
-    // - beginning of a new run statement
-    // then the internal counter should not be incremented
+	// Use the time step number inherited from LAMMPS
+	if ( (_lmp->update->ntimestep-1)*timestep_factor+timestep_small+1 - previous_step == 1 )
+	  colvars->it++;
+	// Other cases could mean:
+	// - run 0
+	// - beginning of a new run statement
+	// then the internal counter should not be incremented
+	previous_step = (_lmp->update->ntimestep-1)*timestep_factor+timestep_small+1;
+	timestep_small++;
+	if (timestep_small == timestep_factor) timestep_small = 0;
   }
-  previous_step = _lmp->update->ntimestep;
 
   if (cvm::debug()) {
     cvm::log(cvm::line_marker+

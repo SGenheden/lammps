@@ -613,9 +613,9 @@ void FixColvars::setup(int vflag)
   if (strstr(update->integrate_style,"verlet") || (update->whichflag == 2))
     post_force(vflag);
   else {
-    ((Respa *) update->integrate)->copy_flevel_f(nlevels_respa-1);
-    post_force_respa(vflag,nlevels_respa-1,0);
-    ((Respa *) update->integrate)->copy_f_flevel(nlevels_respa-1);
+    ((Respa *) update->integrate)->copy_flevel_f(0);
+    post_force_respa(vflag,0,0);
+    ((Respa *) update->integrate)->copy_f_flevel(0);
   }
 }
 
@@ -792,8 +792,9 @@ void FixColvars::min_post_force(int vflag)
 /* ---------------------------------------------------------------------- */
 void FixColvars::post_force_respa(int vflag, int ilevel, int iloop)
 {
-  /* only process colvar forces on the outmost RESPA level. */
-  if (ilevel == nlevels_respa-1) post_force(vflag);
+  /* only process colvar forces on the innermost RESPA level. */
+//  if (ilevel == nlevels_respa-1) post_force(vflag);
+  if (ilevel == 0) post_force(vflag);
   return;
 }
 

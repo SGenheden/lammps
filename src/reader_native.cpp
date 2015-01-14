@@ -24,7 +24,7 @@ using namespace LAMMPS_NS;
 
 // also in read_dump.cpp
 
-enum{ID,TYPE,X,Y,Z,VX,VY,VZ,Q,IX,IY,IZ};
+enum{ID,TYPE,X,Y,Z,VX,VY,VZ,Q,IX,IY,IZ,MUX,MUY,MUZ};
 enum{UNSET,NOSCALE_NOWRAP,NOSCALE_WRAP,SCALE_NOWRAP,SCALE_WRAP};
 
 /* ---------------------------------------------------------------------- */
@@ -257,6 +257,13 @@ bigint ReaderNative::read_header(double box[3][3], int &triclinic,
       fieldindex[i] = find_label("iy",nwords,labels);
     else if (fieldtype[i] == IZ)
       fieldindex[i] = find_label("iz",nwords,labels);
+
+    else if (fieldtype[i] == MUX)
+      fieldindex[i] = find_label("mux",nwords,labels);
+    else if (fieldtype[i] == MUY)
+      fieldindex[i] = find_label("muy",nwords,labels);
+    else if (fieldtype[i] == MUZ)
+      fieldindex[i] = find_label("muz",nwords,labels);
   }
 
   delete [] labels;

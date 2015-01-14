@@ -70,6 +70,11 @@ class colvarproxy_lammps : public colvarproxy {
   void init(const char*);
   void setup();
 
+  // Factor rRESPA integrator
+  private :
+    int timestep_factor;
+    int timestep_small;
+
  // disable default and copy constructor
  private:
   colvarproxy_lammps() {};

@@ -247,6 +247,12 @@ remap.cpp
 remap.h
 remap_wrap.cpp
 remap_wrap.h
+colvarproxy_lammps.cpp
+colvarproxy_lammps.h
+fix_colvars.cpp
+fix_colvars.h
+group_ndx.cpp
+group_ndx.h
 lmp_iccO3-openmpi1.6.4-intel2013
 style_angle.h
 style_atom.h
