@@ -13,6 +13,7 @@ log.*
 .*.swp
 *.orig
 
+installation_notes.txt
 Makefile.package
 Makefile.package.settings
 angle_charmm.cpp

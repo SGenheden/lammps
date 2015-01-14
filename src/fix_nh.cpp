@@ -45,6 +45,7 @@ using namespace FixConst;
 enum{NOBIAS,BIAS};
 enum{NONE,XYZ,XY,YZ,XZ};
 enum{ISO,ANISO,TRICLINIC};
+enum{NOUPDATE,DIPOLE};
 
 /* ----------------------------------------------------------------------
    NVT,NPH,NPT integrators for improved Nose-Hoover equations of motion
@@ -62,6 +63,7 @@ FixNH::FixNH(LAMMPS *lmp, int narg, char **arg) : Fix(lmp, narg, arg)
   global_freq = 1;
   extscalar = 1;
   extvector = 0;
+  extra = NOUPDATE;
 
   // default values
 
@@ -327,6 +329,11 @@ FixNH::FixNH(LAMMPS *lmp, int narg, char **arg) : Fix(lmp, narg, arg)
       fixedpoint[1] = force->numeric(FLERR,arg[iarg+2]);
       fixedpoint[2] = force->numeric(FLERR,arg[iarg+3]);
       iarg += 4;
+    } else if (strcmp(arg[iarg],"update") == 0) {
+         if (iarg+2 > narg) error->all(FLERR,"Illegal fix nvt/nph/npt sphere command");
+         if (strcmp(arg[iarg+1],"dipole") == 0) extra = DIPOLE;
+         else error->all(FLERR,"Illegal fix nvt/nph/npt sphere command");
+         iarg += 2;
     } else error->all(FLERR,"Illegal fix nvt/npt/nph command");
   }
 

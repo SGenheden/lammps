@@ -26,6 +26,7 @@ using namespace LAMMPS_NS;
 using namespace FixConst;
 
 #define INERTIA 0.4          // moment of inertia prefactor for sphere
+enum{NOUPDATE,DIPOLE};
 
 /* ---------------------------------------------------------------------- */
 
@@ -34,6 +35,8 @@ FixNHSphere::FixNHSphere(LAMMPS *lmp, int narg, char **arg) :
 {
   if (!atom->sphere_flag)
     error->all(FLERR,"Fix nvt/nph/npt sphere requires atom style sphere");
+  if (extra == DIPOLE && !atom->mu_flag)
+    error->all(FLERR,"Fix nvt/nph/npt sphere requires atom attribute mu");
 }
 
 /* ---------------------------------------------------------------------- */
@@ -53,6 +56,23 @@ void FixNHSphere::init()
         error->one(FLERR,"Fix nvt/sphere requires extended particles");
 
   FixNH::init();
+}
+
+/* ---------------------------------------------------------------------- */
+
+void FixNHSphere::initial_integrate(int vflag)
+{
+  FixNH::initial_integrate(vflag);
+  update_dipole();
+}
+
+/* ---------------------------------------------------------------------- */
+
+void FixNHSphere::initial_integrate_respa(int vflag, int ilevel, int iloop)
+{
+
+  FixNH::initial_integrate_respa(vflag,ilevel,iloop);
+  update_dipole();
 }
 
 /* ----------------------------------------------------------------------
@@ -113,4 +133,38 @@ void FixNHSphere::nh_v_temp()
       omega[i][2] *= factor_eta;
     }
   }
+}
+
+/* ----------------------------------------------------------------------
+   update mu for dipoles
+   d_mu/dt = omega cross mu
+   renormalize mu to dipole length
+-----------------------------------------------------------------------*/
+
+void FixNHSphere::update_dipole()
+{
+
+  if (extra == DIPOLE) {
+    double msq,scale;
+    double g[3];
+    double **omega = atom->omega;
+    double **mu = atom->mu;
+    int *mask = atom->mask;
+    int nlocal = atom->nlocal;
+    if (igroup == atom->firstgroup) nlocal = atom->nfirst;
+
+    for (int i = 0; i < nlocal; i++)
+      if (mask[i] & groupbit)
+        if (mu[i][3] > 0.0) {
+          g[0] = mu[i][0] + dtv * (omega[i][1]*mu[i][2]-omega[i][2]*mu[i][1]);
+          g[1] = mu[i][1] + dtv * (omega[i][2]*mu[i][0]-omega[i][0]*mu[i][2]);
+          g[2] = mu[i][2] + dtv * (omega[i][0]*mu[i][1]-omega[i][1]*mu[i][0]);
+          msq = g[0]*g[0] + g[1]*g[1] + g[2]*g[2];
+          scale = mu[i][3]/sqrt(msq);
+          mu[i][0] = g[0]*scale;
+          mu[i][1] = g[1]*scale;
+          mu[i][2] = g[2]*scale;
+        }
+  }
+
 }

@@ -119,6 +119,8 @@ class FixNH : public Fix {
 
   double fixedpoint[3];            // location of dilation fixed-point
 
+  int extra; // flag for dipole update
+
   void couple();
   void remap();
   void nhc_temp_integrate();
