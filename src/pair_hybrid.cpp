@@ -25,6 +25,7 @@
 #include "comm.h"
 #include "memory.h"
 #include "error.h"
+#include "respa.h"
 
 using namespace LAMMPS_NS;
 
@@ -98,15 +99,23 @@ void PairHybrid::compute(int eflag, int vflag)
   if (vflag % 4 == 2) vflag_substyle = vflag/4 * 4;
   else vflag_substyle = vflag;
 
+  // check if we are using respa run_style with hybrid keyword
+  bool respa_hybrid = strstr(update->integrate_style,"respa") && (((Respa*)update->integrate)->nhybrid_styles>0);
+
   for (m = 0; m < nstyles; m++) {
 
-    // invoke compute() unless compute flag is turned off or
-    // outerflag is set and sub-style has a compute_outer() method
+	if (!respa_hybrid || (respa_hybrid && ((Respa*)update->integrate)->compute_style[m])) {
 
-    if (styles[m]->compute_flag == 0) continue;
-    if (outerflag && styles[m]->respa_enable) 
-      styles[m]->compute_outer(eflag,vflag_substyle);
-    else styles[m]->compute(eflag,vflag_substyle);
+	  // invoke compute() unless
+	  // outerflag is set and sub-style has a compute_outer() method
+
+	  if (outerflag && styles[m]->respa_enable)
+	    styles[m]->compute_outer(eflag,vflag_substyle);
+	  else styles[m]->compute(eflag,vflag_substyle);
+	}
+
+    if (respa_hybrid && !((Respa*)update->integrate)->tally_global)
+	  continue;
 
     if (eflag_global) {
       eng_vdwl += styles[m]->eng_vdwl;

@@ -12,7 +12,8 @@
 ------------------------------------------------------------------------- */
 
 /* ----------------------------------------------------------------------
-   Contributing author: Mario Orsi (U Southampton), orsimario@gmail.com
+   Contributing authors: Mario Orsi (QMUL), m.orsi@qmul.ac.uk
+                         Samuel Genheden (University of Southampton)
 ------------------------------------------------------------------------- */
 
 #include "math.h"
@@ -34,7 +35,9 @@ using namespace LAMMPS_NS;
 
 PairLJSFDipoleSF::PairLJSFDipoleSF(LAMMPS *lmp) : Pair(lmp)
 {
-  single_enable = 0;
+  special_lj[0] = special_coul[0] = 1.0;
+  special_lj[1] = special_lj[2] = special_lj[3] = 0.0;
+  special_coul[1] = special_coul[2] = special_coul[3] = 0.0;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -55,6 +58,7 @@ PairLJSFDipoleSF::~PairLJSFDipoleSF()
     memory->destroy(lj2);
     memory->destroy(lj3);
     memory->destroy(lj4);
+    memory->destroy(scale);
   }
 }
 
@@ -86,8 +90,9 @@ void PairLJSFDipoleSF::compute(int eflag, int vflag)
   double **torque = atom->torque;
   int *type = atom->type;
   int nlocal = atom->nlocal;
-  double *special_coul = force->special_coul;
-  double *special_lj = force->special_lj;
+// The global scaling parameters aren't used anymore
+//  double *special_coul = force->special_coul;
+//  double *special_lj = force->special_lj;
   int newton_pair = force->newton_pair;
   double qqrd2e = force->qqrd2e;
 
@@ -236,7 +241,7 @@ void PairLJSFDipoleSF::compute(int eflag, int vflag)
 
         // total force
 
-        fq = factor_coul*qqrd2e;
+        fq = factor_coul*qqrd2e*scale[itype][jtype];
         fx = fq*forcecoulx + delx*forcelj;
         fy = fq*forcecouly + dely*forcelj;
         fz = fq*forcecoulz + delz*forcelj;
@@ -270,7 +275,7 @@ void PairLJSFDipoleSF::compute(int eflag, int vflag)
               ecoul += -q[j] * r3inv * pqfac * pidotr;
             if (mu[j][3] > 0.0 && qtmp != 0.0)
               ecoul += qtmp * r3inv * qpfac * pjdotr;
-            ecoul *= factor_coul*qqrd2e;
+            ecoul *= factor_coul*qqrd2e*scale[itype][jtype];
           } else ecoul = 0.0;
 
           if (rsq < cut_ljsq[itype][jtype]) {
@@ -317,6 +322,7 @@ void PairLJSFDipoleSF::allocate()
   memory->create(lj2,n+1,n+1,"pair:lj2");
   memory->create(lj3,n+1,n+1,"pair:lj3");
   memory->create(lj4,n+1,n+1,"pair:lj4");
+  memory->create(scale,n+1,n+1,"pair:scale");
 }
 
 /* ----------------------------------------------------------------------
@@ -325,15 +331,19 @@ void PairLJSFDipoleSF::allocate()
 
 void PairLJSFDipoleSF::settings(int narg, char **arg)
 {
-  if (narg < 1 || narg > 2)
+  if (narg < 1 || narg > 5)
     error->all(FLERR,"Incorrect args in pair_style command");
 
   if (strcmp(update->unit_style,"electron") == 0)
     error->all(FLERR,"Cannot (yet) use 'electron' units with dipoles");
 
-  cut_lj_global = force->numeric(FLERR,arg[0]);
-  if (narg == 1) cut_coul_global = cut_lj_global;
-  else cut_coul_global = force->numeric(FLERR,arg[1]);
+  special_coul[1] = special_lj[1] = force->numeric(FLERR,arg[0]);
+  special_coul[2] = special_lj[2] = force->numeric(FLERR,arg[1]);
+  special_coul[3] = special_lj[3] = force->numeric(FLERR,arg[2]);
+
+  cut_lj_global = force->numeric(FLERR,arg[3]);
+  if (narg == 4) cut_coul_global = cut_lj_global;
+  else cut_coul_global = force->numeric(FLERR,arg[4]);
 
   // reset cutoffs that have been explicitly set
 
@@ -354,7 +364,7 @@ void PairLJSFDipoleSF::settings(int narg, char **arg)
 
 void PairLJSFDipoleSF::coeff(int narg, char **arg)
 {
-  if (narg < 4 || narg > 6)
+  if (narg < 4 || narg > 7)
     error->all(FLERR,"Incorrect args for pair coefficients");
   if (!allocated) allocate();
 
@@ -365,10 +375,13 @@ void PairLJSFDipoleSF::coeff(int narg, char **arg)
   double epsilon_one = force->numeric(FLERR,arg[2]);
   double sigma_one = force->numeric(FLERR,arg[3]);
 
+  double scale_one = 1.0;
+  if (narg >= 5) scale_one = force->numeric(FLERR,arg[4]);
+
   double cut_lj_one = cut_lj_global;
   double cut_coul_one = cut_coul_global;
-  if (narg >= 5) cut_coul_one = cut_lj_one = force->numeric(FLERR,arg[4]);
-  if (narg == 6) cut_coul_one = force->numeric(FLERR,arg[5]);
+  if (narg >= 6) cut_coul_one = cut_lj_one = force->numeric(FLERR,arg[5]);
+  if (narg == 7) cut_coul_one = force->numeric(FLERR,arg[6]);
 
   int count = 0;
   for (int i = ilo; i <= ihi; i++) {
@@ -378,6 +391,7 @@ void PairLJSFDipoleSF::coeff(int narg, char **arg)
       cut_lj[i][j] = cut_lj_one;
       cut_coul[i][j] = cut_coul_one;
       setflag[i][j] = 1;
+      scale[i][j] = scale_one;
       count++;
     }
   }
@@ -426,6 +440,7 @@ double PairLJSFDipoleSF::init_one(int i, int j)
   lj2[j][i] = lj2[i][j];
   lj3[j][i] = lj3[i][j];
   lj4[j][i] = lj4[i][j];
+  scale[j][i] = scale[i][j];
 
   return cut;
 }
@@ -507,4 +522,106 @@ void PairLJSFDipoleSF::read_restart_settings(FILE *fp)
   MPI_Bcast(&cut_lj_global,1,MPI_DOUBLE,0,world);
   MPI_Bcast(&cut_coul_global,1,MPI_DOUBLE,0,world);
   MPI_Bcast(&mix_flag,1,MPI_INT,0,world);
+}
+
+// PairLJSFDipoleSF: calculation of force is missing (to be implemented)
+double PairLJSFDipoleSF::single(int i, int j, int itype, int jtype, double rsq,
+				double factor_coul, double factor_lj,
+				double &fforce)
+{
+  double r2inv,r6inv;
+  double pdotp,pidotr,pjdotr,pre1,delx,dely,delz;
+  double rinv, r3inv,r5inv, rcutlj2inv, rcutcoul2inv,rcutlj6inv;
+  double qtmp,xtmp,ytmp,ztmp,bfac,pqfac,qpfac, ecoul, evdwl;
+
+  double **x = atom->x;
+  double *q = atom->q;
+  double **mu = atom->mu;
+
+  qtmp = q[i];
+  xtmp = x[i][0];
+  ytmp = x[i][1];
+  ztmp = x[i][2];
+
+  r2inv = 1.0/rsq;
+  rinv = sqrt(r2inv);
+  fforce = 0.0;
+
+  if (rsq < cut_coulsq[itype][jtype]) {
+    delx = xtmp - x[j][0];
+    dely = ytmp - x[j][1];
+    delz = ztmp - x[j][2];
+    // if (qtmp != 0.0 && q[j] != 0.0) {
+    //   pre1 = qtmp*q[j]*rinv*(r2inv-1.0/cut_coulsq[itype][jtype]);
+    //   forcecoulx += pre1*delx;
+    //   forcecouly += pre1*dely;
+    //   forcecoulz += pre1*delz;
+    // }
+    if (mu[i][3] > 0.0 && mu[j][3] > 0.0) {
+      r3inv = r2inv*rinv;
+      r5inv = r3inv*r2inv;
+      rcutcoul2inv=1.0/cut_coulsq[itype][jtype];
+      pdotp = mu[i][0]*mu[j][0] + mu[i][1]*mu[j][1] + mu[i][2]*mu[j][2];
+      pidotr = mu[i][0]*delx + mu[i][1]*dely + mu[i][2]*delz;
+      pjdotr = mu[j][0]*delx + mu[j][1]*dely + mu[j][2]*delz;
+      bfac = 1.0 - 4.0*rsq*sqrt(rsq)*rcutcoul2inv*sqrt(rcutcoul2inv) +
+	3.0*rsq*rsq*rcutcoul2inv*rcutcoul2inv;
+    }
+    if (mu[i][3] > 0.0 && q[j] != 0.0) {
+      r3inv = r2inv*rinv;
+      r5inv = r3inv*r2inv;
+      pidotr = mu[i][0]*delx + mu[i][1]*dely + mu[i][2]*delz;
+      rcutcoul2inv=1.0/cut_coulsq[itype][jtype];
+      pqfac = 1.0 - 3.0*rsq*rcutcoul2inv +
+	2.0*rsq*sqrt(rsq)*rcutcoul2inv*sqrt(rcutcoul2inv);
+    }
+    if (mu[j][3] > 0.0 && qtmp != 0.0) {
+      r3inv = r2inv*rinv;
+      r5inv = r3inv*r2inv;
+      pjdotr = mu[j][0]*delx + mu[j][1]*dely + mu[j][2]*delz;
+      rcutcoul2inv=1.0/cut_coulsq[itype][jtype];
+      qpfac = 1.0 - 3.0*rsq*rcutcoul2inv +
+	2.0*rsq*sqrt(rsq)*rcutcoul2inv*sqrt(rcutcoul2inv);
+    }
+  }
+  if (rsq < cut_ljsq[itype][jtype]) {
+    r6inv = r2inv*r2inv*r2inv;
+    rcutlj2inv = 1.0 / cut_ljsq[itype][jtype];
+    rcutlj6inv = rcutlj2inv * rcutlj2inv * rcutlj2inv;
+  }
+
+  double eng = 0.0;
+  if (rsq < cut_coulsq[itype][jtype]) {
+    ecoul = (1.0-sqrt(rsq)/sqrt(cut_coulsq[itype][jtype]));
+    ecoul *= ecoul;
+    ecoul *= qtmp * q[j] * rinv;
+    if (mu[i][3] > 0.0 && mu[j][3] > 0.0)
+      ecoul += bfac * (r3inv*pdotp - 3.0*r5inv*pidotr*pjdotr);
+    if (mu[i][3] > 0.0 && q[j] != 0.0)
+      ecoul += -q[j] * r3inv * pqfac * pidotr;
+    if (mu[j][3] > 0.0 && qtmp != 0.0)
+      ecoul += qtmp * r3inv * qpfac * pjdotr;
+    ecoul *= factor_coul*force->qqrd2e*scale[itype][jtype];
+    eng += ecoul;
+  }
+  if (rsq < cut_ljsq[itype][jtype]) {
+    evdwl = r6inv*(lj3[itype][jtype]*r6inv-lj4[itype][jtype])+
+      rcutlj6inv*(6*lj3[itype][jtype]*rcutlj6inv-3*lj4[itype][jtype])*
+      rsq*rcutlj2inv+
+      rcutlj6inv*(-7*lj3[itype][jtype]*rcutlj6inv+4*lj4[itype][jtype]);
+    eng += evdwl*factor_lj;
+  }
+
+  return eng;
+}
+
+/* ---------------------------------------------------------------------- */
+
+void *PairLJSFDipoleSF::extract(const char *str, int &dim)
+{
+  dim = 2;
+  if (strcmp(str,"epsilon") == 0) return (void *) epsilon;
+  if (strcmp(str,"sigma") == 0) return (void *) sigma;
+  if (strcmp(str,"scale") == 0) return (void *) scale;
+  return NULL;
 }

@@ -1,4 +1,4 @@
-/* -*- c++ -*- ----------------------------------------------------------
+/* ----------------------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
    http://lammps.sandia.gov, Sandia National Laboratories
    Steve Plimpton, sjplimp@sandia.gov
@@ -37,6 +37,8 @@ class PairLJSFDipoleSF : public Pair {
   void read_restart(FILE *);
   void write_restart_settings(FILE *);
   void read_restart_settings(FILE *);
+  virtual double single(int, int, int, int, double, double, double, double &);
+  void *extract(const char *, int &);
 
  protected:
   double cut_lj_global,cut_coul_global;
@@ -44,6 +46,9 @@ class PairLJSFDipoleSF : public Pair {
   double **cut_coul,**cut_coulsq;
   double **epsilon,**sigma;
   double **lj1,**lj2,**lj3,**lj4;
+  double **scale;
+  double special_lj[4];      // 1-2, 1-3, 1-4 prefactors for LJ
+  double special_coul[4];    // 1-2, 1-3, 1-4 prefactors for Coulombics
 
   void allocate();
 };

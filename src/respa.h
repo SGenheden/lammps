@@ -38,6 +38,11 @@ class Respa : public Integrate {
   int level_bond,level_angle,level_dihedral;   // level to compute forces at
   int level_improper,level_pair,level_kspace;
   int level_inner,level_middle,level_outer;
+  // Added for hybrid keyword
+  int nhybrid_styles; // number of hybrid sub-styles
+  int *hybrid_level; // level to compute sub-style forces at
+  bool *compute_style; // flag for computing sub-style forces
+  bool compute_pair,tally_global; // flags for computing forces and tallying global energy/virial
 
   Respa(class LAMMPS *, int, char **);
   virtual ~Respa();
@@ -61,6 +66,7 @@ class Respa : public Integrate {
   virtual void recurse(int);
   void force_clear(int);
   void sum_flevel_f();
+  void set_compute_flags(int ilevel);
 };
 
 }
@@ -84,6 +90,12 @@ E: Cannot set both respa pair and inner/middle/outer
 
 In the rRESPA integrator, you must compute pairwise potentials either
 all together (pair), or in pieces (inner/middle/outer).  You can't do
+both.
+
+E: Cannot set both respa hybrid and pair/inner/middle/out
+
+In the rRESPA integrator, you must compute pairwise potentials either
+all together (pair), or in pieces (hybrid).  You can't do
 both.
 
 E: Must set both respa inner and outer
