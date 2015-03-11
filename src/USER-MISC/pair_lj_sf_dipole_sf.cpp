@@ -462,6 +462,7 @@ void PairLJSFDipoleSF::write_restart(FILE *fp)
         fwrite(&sigma[i][j],sizeof(double),1,fp);
         fwrite(&cut_lj[i][j],sizeof(double),1,fp);
         fwrite(&cut_coul[i][j],sizeof(double),1,fp);
+        fwrite(&scale[i][j],sizeof(double),1,fp);
       }
     }
 }
@@ -488,11 +489,13 @@ void PairLJSFDipoleSF::read_restart(FILE *fp)
           fread(&sigma[i][j],sizeof(double),1,fp);
           fread(&cut_lj[i][j],sizeof(double),1,fp);
           fread(&cut_coul[i][j],sizeof(double),1,fp);
+          fread(&scale[i][j],sizeof(double),1,fp);
         }
         MPI_Bcast(&epsilon[i][j],1,MPI_DOUBLE,0,world);
         MPI_Bcast(&sigma[i][j],1,MPI_DOUBLE,0,world);
         MPI_Bcast(&cut_lj[i][j],1,MPI_DOUBLE,0,world);
         MPI_Bcast(&cut_coul[i][j],1,MPI_DOUBLE,0,world);
+        MPI_Bcast(&scale[i][j],1,MPI_DOUBLE,0,world);
       }
     }
 }
@@ -505,6 +508,10 @@ void PairLJSFDipoleSF::write_restart_settings(FILE *fp)
 {
   fwrite(&cut_lj_global,sizeof(double),1,fp);
   fwrite(&cut_coul_global,sizeof(double),1,fp);
+  for (int i=0;i<4;i++) {
+    fwrite(&special_coul[i],sizeof(double),1,fp);
+    fwrite(&special_lj[i],sizeof(double),1,fp);
+  }
   fwrite(&mix_flag,sizeof(int),1,fp);
 }
 
@@ -517,11 +524,19 @@ void PairLJSFDipoleSF::read_restart_settings(FILE *fp)
   if (comm->me == 0) {
     fread(&cut_lj_global,sizeof(double),1,fp);
     fread(&cut_coul_global,sizeof(double),1,fp);
+    for (int i=0;i<4;i++) {
+      fread(&special_coul[i],sizeof(double),1,fp);
+      fread(&special_lj[i],sizeof(double),1,fp);
+    }
     fread(&mix_flag,sizeof(int),1,fp);
   }
   MPI_Bcast(&cut_lj_global,1,MPI_DOUBLE,0,world);
   MPI_Bcast(&cut_coul_global,1,MPI_DOUBLE,0,world);
   MPI_Bcast(&mix_flag,1,MPI_INT,0,world);
+  for (int i=0;i<4;i++) {
+    MPI_Bcast(&special_coul[i],1,MPI_DOUBLE,0,world);
+    MPI_Bcast(&special_lj[i],1,MPI_DOUBLE,0,world);
+  }
 }
 
 // PairLJSFDipoleSF: calculation of force is missing (to be implemented)
