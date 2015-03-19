@@ -675,8 +675,10 @@ void PairLJCharmmCoulLong14::init_style()
 
   memory->create(elescale,n+1,n+1,"pair:elescale");
   for (int i = 1; i <= n; i++)
-    for (int j = i; j <= n; j++)
+    for (int j = i; j <= n; j++) {
       elescale[i][j] = 1.0;
+      elescale[j][i] = 1.0;
+    }
 }
 
 /* ---------------------------------------------------------------------- */
