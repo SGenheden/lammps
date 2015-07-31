@@ -47,8 +47,6 @@ class PairLJSFDipoleSF : public Pair {
   double **epsilon,**sigma;
   double **lj1,**lj2,**lj3,**lj4;
   double **scale;
-  double special_lj[4];      // 1-2, 1-3, 1-4 prefactors for LJ
-  double special_coul[4];    // 1-2, 1-3, 1-4 prefactors for Coulombics
 
   void allocate();
 };

@@ -35,9 +35,6 @@ using namespace LAMMPS_NS;
 
 PairLJSFDipoleSF::PairLJSFDipoleSF(LAMMPS *lmp) : Pair(lmp)
 {
-  special_lj[0] = special_coul[0] = 1.0;
-  special_lj[1] = special_lj[2] = special_lj[3] = 0.0;
-  special_coul[1] = special_coul[2] = special_coul[3] = 0.0;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -91,8 +88,8 @@ void PairLJSFDipoleSF::compute(int eflag, int vflag)
   int *type = atom->type;
   int nlocal = atom->nlocal;
 // The global scaling parameters aren't used anymore
-//  double *special_coul = force->special_coul;
-//  double *special_lj = force->special_lj;
+  double *special_coul = force->special_coul;
+  double *special_lj = force->special_lj;
   int newton_pair = force->newton_pair;
   double qqrd2e = force->qqrd2e;
 
@@ -337,13 +334,9 @@ void PairLJSFDipoleSF::settings(int narg, char **arg)
   if (strcmp(update->unit_style,"electron") == 0)
     error->all(FLERR,"Cannot (yet) use 'electron' units with dipoles");
 
-  special_coul[1] = special_lj[1] = force->numeric(FLERR,arg[0]);
-  special_coul[2] = special_lj[2] = force->numeric(FLERR,arg[1]);
-  special_coul[3] = special_lj[3] = force->numeric(FLERR,arg[2]);
-
-  cut_lj_global = force->numeric(FLERR,arg[3]);
-  if (narg == 4) cut_coul_global = cut_lj_global;
-  else cut_coul_global = force->numeric(FLERR,arg[4]);
+  cut_lj_global = force->numeric(FLERR,arg[1]);
+  if (narg == 1) cut_coul_global = cut_lj_global;
+  else cut_coul_global = force->numeric(FLERR,arg[2]);
 
   // reset cutoffs that have been explicitly set
 
@@ -508,10 +501,6 @@ void PairLJSFDipoleSF::write_restart_settings(FILE *fp)
 {
   fwrite(&cut_lj_global,sizeof(double),1,fp);
   fwrite(&cut_coul_global,sizeof(double),1,fp);
-  for (int i=0;i<4;i++) {
-    fwrite(&special_coul[i],sizeof(double),1,fp);
-    fwrite(&special_lj[i],sizeof(double),1,fp);
-  }
   fwrite(&mix_flag,sizeof(int),1,fp);
 }
 
@@ -524,19 +513,11 @@ void PairLJSFDipoleSF::read_restart_settings(FILE *fp)
   if (comm->me == 0) {
     fread(&cut_lj_global,sizeof(double),1,fp);
     fread(&cut_coul_global,sizeof(double),1,fp);
-    for (int i=0;i<4;i++) {
-      fread(&special_coul[i],sizeof(double),1,fp);
-      fread(&special_lj[i],sizeof(double),1,fp);
-    }
     fread(&mix_flag,sizeof(int),1,fp);
   }
   MPI_Bcast(&cut_lj_global,1,MPI_DOUBLE,0,world);
   MPI_Bcast(&cut_coul_global,1,MPI_DOUBLE,0,world);
   MPI_Bcast(&mix_flag,1,MPI_INT,0,world);
-  for (int i=0;i<4;i++) {
-    MPI_Bcast(&special_coul[i],1,MPI_DOUBLE,0,world);
-    MPI_Bcast(&special_lj[i],1,MPI_DOUBLE,0,world);
-  }
 }
 
 // PairLJSFDipoleSF: calculation of force is missing (to be implemented)
