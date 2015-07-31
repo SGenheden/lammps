@@ -38,11 +38,6 @@ class Respa : public Integrate {
   int level_bond,level_angle,level_dihedral;   // level to compute forces at
   int level_improper,level_pair,level_kspace;
   int level_inner,level_middle,level_outer;
-  // Added for hybrid keyword
-  int nhybrid_styles; // number of hybrid sub-styles
-  int *hybrid_level; // level to compute sub-style forces at
-  bool *compute_style; // flag for computing sub-style forces
-  bool compute_pair,tally_global; // flags for computing forces and tallying global energy/virial
 
   int nhybrid_styles;     // number of hybrid pair styles
   int *hybrid_level;      // level to compute pair hybrid sub-style at

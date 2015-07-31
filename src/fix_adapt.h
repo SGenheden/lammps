@@ -36,7 +36,6 @@ class FixAdapt : public Fix {
   void init();
   void setup_pre_force(int);
   void pre_force(int);
-  void pre_force_respa(int, int, int);
   void post_run();
   void setup_pre_force_respa(int,int);
   void pre_force_respa(int,int,int);
