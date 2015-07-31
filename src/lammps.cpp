@@ -71,6 +71,8 @@ LAMMPS::LAMMPS(int narg, char **arg, MPI_Comm communicator)
   logfile = NULL;
   infile = NULL;
 
+  initclock = MPI_Wtime();
+
   // parse input switches
 
   int inflag = 0;
@@ -249,7 +251,8 @@ LAMMPS::LAMMPS(int narg, char **arg, MPI_Comm communicator)
   // sum of procs in all worlds must equal total # of procs
 
   if (!universe->consistent())
-    error->universe_all(FLERR,"Processor partitions are inconsistent");
+    error->universe_all(FLERR,"Processor partitions do not match "
+                        "number of allocated processors");
 
   // universe cannot use stdin for input file
 

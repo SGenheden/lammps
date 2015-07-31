@@ -92,7 +92,7 @@ void ComputeCNAAtom::init()
 
   // need an occasional full neighbor list
 
-  int irequest = neighbor->request((void *) this);
+  int irequest = neighbor->request(this,instance_me);
   neighbor->requests[irequest]->pair = 0;
   neighbor->requests[irequest]->compute = 1;
   neighbor->requests[irequest]->half = 0;
@@ -262,7 +262,7 @@ void ComputeCNAAtom::compute_peratom()
         firstflag = 1;
         ncommon = 0;
         for (inear = 0; inear < nnearest[i]; inear++)
-          for (jnear = 0; jnear < n; jnear++)
+          for (jnear = 0; (jnear < n) && (n < MAXNEAR); jnear++)
             if (nearest[i][inear] == onenearest[jnear]) {
               if (ncommon < MAXCOMMON) common[ncommon++] = nearest[i][inear];
               else if (firstflag) {

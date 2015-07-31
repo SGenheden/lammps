@@ -38,6 +38,9 @@ class FixAdapt : public Fix {
   void pre_force(int);
   void pre_force_respa(int, int, int);
   void post_run();
+  void setup_pre_force_respa(int,int);
+  void pre_force_respa(int,int,int);
+  void set_arrays(int);
 
  private:
   int nadapt,resetflag,scaleflag;
@@ -77,6 +80,10 @@ Self-explanatory.  Check the input script syntax and compare to the
 documentation for the command.  You can use -echo screen as a
 command-line option when running LAMMPS to see the offending line.
 
+E: Cannot use dynamic group with fix adapt atom
+
+This is not yet supported.
+
 E: Variable name for fix adapt does not exist
 
 Self-explanatory.
@@ -108,5 +115,10 @@ The atom style being used does not specify an atom diameter.
 E: Fix adapt requires atom attribute charge
 
 The atom style being used does not specify an atom charge.
+
+E: Could not find fix adapt storage fix ID
+
+This should not happen unless you explicitly deleted
+a secondary fix that fix adapt created internally.
 
 */

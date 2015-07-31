@@ -58,6 +58,8 @@ PairSW::PairSW(LAMMPS *lmp) : Pair(lmp)
 
 PairSW::~PairSW()
 {
+  if (copymode) return;
+
   if (elements)
     for (int i = 0; i < nelements; i++) delete [] elements[i];
   delete [] elements;
@@ -306,7 +308,7 @@ void PairSW::init_style()
 
   // need a full neighbor list
 
-  int irequest = neighbor->request(this);
+  int irequest = neighbor->request(this,instance_me);
   neighbor->requests[irequest]->half = 0;
   neighbor->requests[irequest]->full = 1;
 }

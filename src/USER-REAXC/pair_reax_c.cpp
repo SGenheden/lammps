@@ -279,7 +279,16 @@ void PairReaxC::coeff( int nargs, char **args )
 
   // read ffield file
 
-  Read_Force_Field(args[2], &(system->reax_param), control);
+  char *file = args[2];
+  FILE *fp;
+  fp = force->open_potential(file);
+  if (fp != NULL) 
+    Read_Force_Field(fp, &(system->reax_param), control);
+  else if (comm->me == 0) {
+      char str[128];
+      sprintf(str,"Cannot open ReaxFF potential file %s",file);
+      error->one(FLERR,str);
+  }
 
   // read args that map atom types to elements in potential file
   // map[i] = which element the Ith atom type is, -1 if NULL
@@ -359,7 +368,7 @@ void PairReaxC::init_style( )
   // need a half neighbor list w/ Newton off and ghost neighbors
   // built whenever re-neighboring occurs
 
-  int irequest = neighbor->request(this);
+  int irequest = neighbor->request(this,instance_me);
   neighbor->requests[irequest]->newton = 2;
   neighbor->requests[irequest]->ghost = 1;
 
@@ -440,15 +449,6 @@ void PairReaxC::setup( )
 
     ReAllocate( system, control, data, workspace, &lists, mpi_data );
   }
-
-  ngroup = 0;
-  int ngroup_sum = 0;
-  for (int i = 0; i < list->inum; i++) {
-    ngroup ++;
-  }
-  MPI_Allreduce( &ngroup, &ngroup_sum, 1, MPI_INT, MPI_SUM, world );
-  ngroup = ngroup_sum;
-
 }
 
 /* ---------------------------------------------------------------------- */

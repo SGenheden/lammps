@@ -1,15 +1,13 @@
 /*
 //@HEADER
 // ************************************************************************
-//
-//                             Kokkos
-//         Manycore Performance-Portable Multidimensional Arrays
-//
-//              Copyright (2012) Sandia Corporation
-//
+// 
+//                        Kokkos v. 2.0
+//              Copyright (2014) Sandia Corporation
+// 
 // Under the terms of Contract DE-AC04-94AL85000 with Sandia Corporation,
 // the U.S. Government retains certain rights in this software.
-//
+// 
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -37,8 +35,8 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
-// Questions?  Contact  H. Carter Edwards (hcedwar@sandia.gov)
-//
+// Questions? Contact  H. Carter Edwards (hcedwar@sandia.gov)
+// 
 // ************************************************************************
 //@HEADER
 */
@@ -46,7 +44,7 @@
 #ifndef KOKKOS_OPENMP_HPP
 #define KOKKOS_OPENMP_HPP
 
-#include <Kokkos_Macros.hpp>
+#include <Kokkos_Core_fwd.hpp>
 
 #if defined( KOKKOS_HAVE_OPENMP ) && defined( _OPENMP )
 
@@ -72,14 +70,14 @@ public:
   //! \name Type declarations that all Kokkos devices must provide.
   //@{
 
-  //! The tag (what type of kokkos_object is this).
-  typedef Impl::ExecutionSpaceTag  kokkos_tag ;
-  typedef OpenMP                device_type ;
+  //! Tag this class as a kokkos execution space
   typedef OpenMP                execution_space ;
-  typedef HostSpace::size_type  size_type ;
   typedef HostSpace             memory_space ;
+  //! This execution space preferred device_type
+  typedef Kokkos::Device<execution_space,memory_space> device_type;
+
   typedef LayoutRight           array_layout ;
-  typedef OpenMP                host_mirror_device_type ;
+  typedef HostSpace::size_type  size_type ;
 
   typedef ScratchMemorySpace< OpenMP > scratch_memory_space ;
 
@@ -136,8 +134,6 @@ public:
   //------------------------------------
 
   inline static unsigned max_hardware_threads() { return thread_pool_size(0); }
-  inline static unsigned team_max()             { return thread_pool_size(1); }
-  inline static unsigned team_recommended()     { return thread_pool_size(2); }
 
   KOKKOS_INLINE_FUNCTION static
   unsigned hardware_thread_id() { return thread_pool_rank(); }
@@ -157,6 +153,7 @@ struct VerifyExecutionCanAccessMemorySpace
   , Kokkos::OpenMP::scratch_memory_space
   >
 {
+  enum { value = true };
   inline static void verify( void ) { }
   inline static void verify( const void * ) { }
 };

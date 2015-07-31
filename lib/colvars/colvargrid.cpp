@@ -10,16 +10,18 @@
 
 colvar_grid_count::colvar_grid_count()
   : colvar_grid<size_t>()
-{}
+{
+  mult = 1;
+}
 
 colvar_grid_count::colvar_grid_count(std::vector<int> const &nx_i,
                                      size_t const           &def_count)
-  : colvar_grid<size_t>(nx_i, def_count)
+  : colvar_grid<size_t>(nx_i, def_count, 1)
 {}
 
 colvar_grid_count::colvar_grid_count(std::vector<colvar *>  &colvars,
                                      size_t const           &def_count)
-  : colvar_grid<size_t>(colvars, def_count)
+  : colvar_grid<size_t>(colvars, def_count, 1)
 {}
 
 std::istream & colvar_grid_count::read_restart(std::istream &is)
@@ -100,6 +102,53 @@ std::ostream & colvar_grid_scalar::write_restart(std::ostream &os)
   return os;
 }
 
+
+cvm::real colvar_grid_scalar::maximum_value() const
+{
+  cvm::real max = data[0];
+  for (size_t i = 0; i < nt; i++) {
+    if (data[i] > max) max = data[i];
+  }
+  return max;
+}
+
+
+cvm::real colvar_grid_scalar::minimum_value() const
+{
+  cvm::real min = data[0];
+  for (size_t i = 0; i < nt; i++) {
+    if (data[i] < min) min = data[i];
+  }
+  return min;
+}
+
+
+cvm::real colvar_grid_scalar::integral() const
+{
+  cvm::real sum = 0.0;
+  for (size_t i = 0; i < nt; i++) {
+    sum += data[i];
+  }
+  cvm::real bin_volume = 1.0;
+  for (size_t id = 0; id < widths.size(); id++) {
+    bin_volume *= widths[id];
+  }
+  return bin_volume * sum;
+}
+
+
+cvm::real colvar_grid_scalar::entropy() const
+{
+  cvm::real sum = 0.0;
+  for (size_t i = 0; i < nt; i++) {
+    sum += -1.0 * data[i] * std::log(data[i]);
+  }
+  cvm::real bin_volume = 1.0;
+  for (size_t id = 0; id < widths.size(); id++) {
+    bin_volume *= widths[id];
+  }
+  return bin_volume * sum;
+}
 
 
 colvar_grid_gradient::colvar_grid_gradient()

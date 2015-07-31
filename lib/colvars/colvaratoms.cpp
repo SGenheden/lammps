@@ -315,20 +315,21 @@ int cvm::atom_group::parse(std::string const &conf,
 #endif
 
   if (!b_dummy) {
+
+    // calculate total mass (TODO: this is the step that most needs deferred re-initialization)
     this->total_mass = 0.0;
     for (cvm::atom_iter ai = this->begin();
          ai != this->end(); ai++) {
       this->total_mass += ai->mass;
     }
-  }
 
-  if (!b_dummy) {
+    // whether these atoms will ever receive forces or not
     bool enable_forces = true;
     // disableForces is deprecated
     if (get_keyval(group_conf, "enableForces", enable_forces, true, mode)) {
       noforce = !enable_forces;
     } else {
-      get_keyval(group_conf, "disableForces", noforce, false, mode);
+      get_keyval(group_conf, "disableForces", noforce, false, colvarparse::parse_silent);
     }
   }
 
@@ -377,12 +378,12 @@ int cvm::atom_group::parse(std::string const &conf,
       }
 
       std::string ref_pos_col;
-      double ref_pos_col_value;
+      double ref_pos_col_value=0.0;
 
       if (get_keyval(group_conf, "refPositionsCol", ref_pos_col, std::string(""), mode)) {
         // if provided, use PDB column to select coordinates
         bool found = get_keyval(group_conf, "refPositionsColValue", ref_pos_col_value, 0.0, mode);
-        if (found && !ref_pos_col_value)
+        if (found && ref_pos_col_value == 0.0)
           cvm::error("Error: refPositionsColValue, "
                       "if provided, must be non-zero.\n");
       } else {

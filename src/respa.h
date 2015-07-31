@@ -44,6 +44,12 @@ class Respa : public Integrate {
   bool *compute_style; // flag for computing sub-style forces
   bool compute_pair,tally_global; // flags for computing forces and tallying global energy/virial
 
+  int nhybrid_styles;     // number of hybrid pair styles
+  int *hybrid_level;      // level to compute pair hybrid sub-style at
+  int *hybrid_compute;    // selects whether to compute sub-style forces
+  int tally_global;       // 1 if pair style should tally global accumulators
+  int pair_compute;       // 1 if pair force need to be computed
+
   Respa(class LAMMPS *, int, char **);
   virtual ~Respa();
   virtual void init();
@@ -92,11 +98,11 @@ In the rRESPA integrator, you must compute pairwise potentials either
 all together (pair), or in pieces (inner/middle/outer).  You can't do
 both.
 
-E: Cannot set both respa hybrid and pair/inner/middle/out
+E: Cannot set respa hybrid and any of pair/inner/middle/outer
 
 In the rRESPA integrator, you must compute pairwise potentials either
-all together (pair), or in pieces (hybrid).  You can't do
-both.
+all together (pair), with different cutoff regions (inner/middle/outer),
+or per hybrid sub-style (hybrid).  You cannot mix those.
 
 E: Must set both respa inner and outer
 

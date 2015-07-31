@@ -287,13 +287,24 @@ void PPPMDisp::init()
     error->warning(FLERR, str);
   }
 
+  // show error message if pppm/disp is not used correctly
+
+  if (function[1] || function[2] || function[3]) {
+    if (!gridflag_6 && !gewaldflag_6 && accuracy_real_6 < 0
+        && accuracy_kspace_6 < 0 && !auto_disp_flag) {
+      error->all(FLERR, "PPPMDisp used but no parameters set, "
+              "for further information please see the pppm/disp "
+              "documentation");
+    }
+  }
+
   // compute qsum & qsqsum, if function[0] is set, warn if not charge-neutral
 
   scale = 1.0;
   qqrd2e = force->qqrd2e;
   natoms_original = atom->natoms;
  
-  if (function[0]) qsum_qsq(0);
+  if (function[0]) qsum_qsq();
 
   // if kspace is TIP4P, extract TIP4P params from pair style
   // bond/angle are not yet init(), so insure equilibrium request is valid
@@ -592,6 +603,15 @@ void PPPMDisp::init()
 
 void PPPMDisp::setup()
 {
+
+  if (slabflag == 0 && domain->nonperiodic > 0)
+    error->all(FLERR,"Cannot use nonperiodic boundaries with PPPMDisp");
+  if (slabflag == 1) {
+    if (domain->xperiodic != 1 || domain->yperiodic != 1 || 
+	domain->boundary[2][0] != 1 || domain->boundary[2][1] != 1)
+      error->all(FLERR,"Incorrect boundaries with slab PPPMDisp");
+  }
+ 
   double *prd;
 
   // volume-dependent factors
@@ -1114,19 +1134,17 @@ void PPPMDisp::compute(int eflag, int vflag)
 
       fieldforce_none_ik();
 
-
-      if (evflag_atom) cg_peratom_6->forward_comm(this, FORWARD_IK_PERATOM_NONE);
+      if (evflag_atom) 
+        cg_peratom_6->forward_comm(this, FORWARD_IK_PERATOM_NONE);
     }
     if (evflag_atom) fieldforce_none_peratom();
   }
 
-  // update qsum and qsqsum, if needed
+  // update qsum and qsqsum, if atom count has changed and energy needed
 
-  if (eflag_global || eflag_atom) {
-    if (qsum_update_flag || (atom->natoms != natoms_original)) {
-      qsum_qsq(0);
-      natoms_original = atom->natoms;
-    }
+  if ((eflag_global || eflag_atom) && atom->natoms != natoms_original) {
+    qsum_qsq();
+    natoms_original = atom->natoms;
   }
 
   // sum energy across procs and add in volume-dependent term

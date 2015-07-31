@@ -74,8 +74,8 @@ PairAWPMDCut::~PairAWPMDCut()
 
 
 struct cmp_x{
-  double tol;
   double **xx;
+  double tol;
   cmp_x(double **xx_=NULL, double tol_=1e-12):xx(xx_),tol(tol_){}
   bool operator()(const pair<int,int> &left, const pair<int,int> &right) const {
     if(left.first==right.first){
@@ -116,8 +116,6 @@ void PairAWPMDCut::compute(int eflag, int vflag)
   double **x = atom->x;
   double **f = atom->f;
   double *q = atom->q;
-  double *erforce = atom->erforce;
-  double *eradius = atom->eradius;
   int *spin = atom->spin;
   int *type = atom->type;
   int *etag = atom->etag;
@@ -128,7 +126,6 @@ void PairAWPMDCut::compute(int eflag, int vflag)
   int ntot=nlocal+nghost;
 
   int newton_pair = force->newton_pair;
-  double qqrd2e = force->qqrd2e;
 
   int inum = list->inum;
   int *ilist = list->ilist;
@@ -548,7 +545,7 @@ void PairAWPMDCut::init_style()
 
   // need a half neigh list and optionally a granular history neigh list
 
-  //int irequest = neighbor->request(this);
+  //int irequest = neighbor->request(this,instance_me);
 
   //if (atom->tag_enable == 0)
   //  error->all(FLERR,"Pair style reax requires atom IDs");
@@ -559,7 +556,7 @@ void PairAWPMDCut::init_style()
   //if (strcmp(update->unit_style,"real") != 0 && comm->me == 0)
     //error->warning(FLERR,"Not using real units with pair reax");
 
-  int irequest = neighbor->request(this);
+  int irequest = neighbor->request(this,instance_me);
   neighbor->requests[irequest]->newton = 2;
 
   if(force->e_mass==0. || force->hhmrr2e==0. || force->mvh2r==0.)

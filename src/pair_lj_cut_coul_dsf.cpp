@@ -52,19 +52,21 @@ PairLJCutCoulDSF::PairLJCutCoulDSF(LAMMPS *lmp) : Pair(lmp)
 
 PairLJCutCoulDSF::~PairLJCutCoulDSF()
 {
-  if (allocated) {
-    memory->destroy(setflag);
-    memory->destroy(cutsq);
+  if (!copymode) {
+    if (allocated) {
+      memory->destroy(setflag);
+      memory->destroy(cutsq);
 
-    memory->destroy(cut_lj);
-    memory->destroy(cut_ljsq);
-    memory->destroy(epsilon);
-    memory->destroy(sigma);
-    memory->destroy(lj1);
-    memory->destroy(lj2);
-    memory->destroy(lj3);
-    memory->destroy(lj4);
-    memory->destroy(offset);
+      memory->destroy(cut_lj);
+      memory->destroy(cut_ljsq);
+      memory->destroy(epsilon);
+      memory->destroy(sigma);
+      memory->destroy(lj1);
+      memory->destroy(lj2);
+      memory->destroy(lj3);
+      memory->destroy(lj4);
+      memory->destroy(offset);
+    }
   }
 }
 
@@ -136,12 +138,14 @@ void PairLJCutCoulDSF::compute(int eflag, int vflag)
 
         if (rsq < cut_coulsq) {
           r = sqrt(rsq);
-          prefactor = factor_coul * qqrd2e*qtmp*q[j]/r;
+          prefactor = qqrd2e*qtmp*q[j]/r;
           erfcd = exp(-alpha*alpha*r*r);
           t = 1.0 / (1.0 + EWALD_P*alpha*r);
           erfcc = t * (A1+t*(A2+t*(A3+t*(A4+t*A5)))) * erfcd;
           forcecoul = prefactor * (erfcc/r + 2.0*alpha/MY_PIS * erfcd + 
-            r*f_shift) * r;
+                                   r*f_shift) * r;
+          if (factor_coul < 1.0) forcecoul -= (1.0-factor_coul)*prefactor;
+          fpair = forcecoul * r2inv;
         } else forcecoul = 0.0;
 
         fpair = (forcecoul + factor_lj*forcelj) * r2inv;
@@ -160,9 +164,10 @@ void PairLJCutCoulDSF::compute(int eflag, int vflag)
                     offset[itype][jtype];
             evdwl *= factor_lj;
           } else evdwl = 0.0;
-          
+
           if (rsq < cut_coulsq) {
             ecoul = prefactor * (erfcc - r*e_shift - rsq*f_shift);
+            if (factor_coul < 1.0) ecoul -= (1.0-factor_coul)*prefactor;
           } else ecoul = 0.0;
         }
 
@@ -268,7 +273,7 @@ void PairLJCutCoulDSF::init_style()
   if (!atom->q_flag)
     error->all(FLERR,"Pair style lj/cut/coul/dsf requires atom attribute q");
 
-  neighbor->request(this);
+  neighbor->request(this,instance_me);
 
   cut_coulsq = cut_coul * cut_coul;
   double erfcc = erfc(alpha*cut_coul); 

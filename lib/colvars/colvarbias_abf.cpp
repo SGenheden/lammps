@@ -1,9 +1,5 @@
 /// -*- c++ -*-
 
-/********************************************************************************
- * Implementation of the ABF and histogram biases                               *
- ********************************************************************************/
-
 #include "colvarmodule.h"
 #include "colvar.h"
 #include "colvarbias_abf.h"
@@ -47,7 +43,7 @@ colvarbias_abf::colvarbias_abf(std::string const &conf, char const *key)
   // shared ABF
   get_keyval(conf, "shared", shared_on, false);
   if (shared_on) {
-    if (!cvm::replica_enabled || cvm::replica_num() <= 1)
+    if (!cvm::replica_enabled() || cvm::replica_num() <= 1)
       cvm::error("Error: shared ABF requires more than one replica.");
     else
       cvm::log("shared ABF will be applied among "+ cvm::to_str(cvm::replica_num()) + " replicas.\n");
@@ -76,6 +72,8 @@ colvarbias_abf::colvarbias_abf(std::string const &conf, char const *key)
 
       if (!colvars[i]->tasks[colvar::task_extended_lagrangian]) {
         // request computation of Jacobian force
+        // ultimately, will be done regardless of extended Lagrangian
+        // and colvar should then just report zero Jacobian force
         colvars[i]->enable(colvar::task_Jacobian_force);
 
         // request Jacobian force as part as system force
@@ -116,7 +114,11 @@ colvarbias_abf::colvarbias_abf(std::string const &conf, char const *key)
   force = new cvm::real [colvars.size()];
 
   // Construct empty grids based on the colvars
-  samples   = new colvar_grid_count    (colvars);
+  if (cvm::debug()) {
+    cvm::log("Allocating count and free energy gradient grids.\n");
+  }
+
+  samples   = new colvar_grid_count(colvars);
   gradients = new colvar_grid_gradient(colvars);
   gradients->samples = samples;
   samples->has_parent_data = true;
@@ -124,7 +126,7 @@ colvarbias_abf::colvarbias_abf(std::string const &conf, char const *key)
   // For shared ABF, we store a second set of grids.
   // This used to be only if "shared" was defined,
   // but now we allow calling share externally (e.g. from Tcl).
-  last_samples   = new colvar_grid_count    (colvars);
+  last_samples   = new colvar_grid_count(colvars);
   last_gradients = new colvar_grid_gradient(colvars);
   last_gradients->samples = last_samples;
   last_samples->has_parent_data = true;
@@ -183,13 +185,6 @@ cvm::real colvarbias_abf::update()
     // At first timestep, do only:
     // initialization stuff (file operations relying on n_abf_biases
     // compute current value of colvars
-
-    if ( cvm::n_abf_biases == 1 && cvm::n_meta_biases == 0 ) {
-      // This is the only ABF bias
-      output_prefix = cvm::output_prefix;
-    } else {
-      output_prefix = cvm::output_prefix + "." + this->name;
-    }
 
     for (size_t i=0; i<colvars.size(); i++) {
       bin[i] = samples->current_bin_scalar(i);
@@ -254,15 +249,24 @@ cvm::real colvarbias_abf::update()
     }
   }
 
+  // update the output prefix; TODO: move later to setup_output() function
+  if ( cvm::n_abf_biases == 1 && cvm::n_meta_biases == 0 ) {
+    // This is the only ABF bias
+    output_prefix = cvm::output_prefix;
+  } else {
+    output_prefix = cvm::output_prefix + "." + this->name;
+  }
+
   if (output_freq && (cvm::step_absolute() % output_freq) == 0) {
     if (cvm::debug()) cvm::log("ABF bias trying to write gradients and samples to disk");
     write_gradients_samples(output_prefix);
   }
+
   if (b_history_files && (cvm::step_absolute() % history_freq) == 0) {
     cvm::log("ABFHISTORYFILE "+cvm::to_str(cvm::step_absolute()));
-    // append to existing file only if cvm::step_absolute() > 0
+    // file already exists iff cvm::step_relative() > 0
     // otherwise, backup and replace
-    write_gradients_samples(output_prefix + ".hist", (cvm::step_absolute() > 0));
+    write_gradients_samples(output_prefix + ".hist", (cvm::step_relative() > 0));
   }
 
   if (shared_on && shared_last_step >= 0 && cvm::step_absolute() % shared_freq == 0) {
@@ -365,28 +369,32 @@ void colvarbias_abf::write_gradients_samples(const std::string &prefix, bool app
   std::string  gradients_out_name = prefix + ".grad";
   std::ios::openmode mode = (append ? std::ios::app : std::ios::out);
 
-  std::ofstream samples_os;
-  std::ofstream gradients_os;
+  cvm::ofstream samples_os;
+  cvm::ofstream gradients_os;
 
   if (!append) cvm::backup_file(samples_out_name.c_str());
   samples_os.open(samples_out_name.c_str(), mode);
-  if (!samples_os.good()) cvm::error("Error opening ABF samples file " + samples_out_name + " for writing");
+  if (!samples_os.is_open()) {
+    cvm::error("Error opening ABF samples file " + samples_out_name + " for writing");
+  }
   samples->write_multicol(samples_os);
   samples_os.close();
 
   if (!append) cvm::backup_file(gradients_out_name.c_str());
   gradients_os.open(gradients_out_name.c_str(), mode);
-  if (!gradients_os.good())	cvm::error("Error opening ABF gradient file " + gradients_out_name + " for writing");
+  if (!gradients_os.is_open()) {
+    cvm::error("Error opening ABF gradient file " + gradients_out_name + " for writing");
+  }
   gradients->write_multicol(gradients_os);
   gradients_os.close();
 
   if (colvars.size() == 1) {
     std::string  pmf_out_name = prefix + ".pmf";
     if (!append) cvm::backup_file(pmf_out_name.c_str());
-    std::ofstream pmf_os;
+    cvm::ofstream pmf_os;
     // Do numerical integration and output a PMF
     pmf_os.open(pmf_out_name.c_str(), mode);
-    if (!pmf_os.good())	cvm::error("Error opening pmf file " + pmf_out_name + " for writing");
+    if (!pmf_os.is_open())	cvm::error("Error opening pmf file " + pmf_out_name + " for writing");
     gradients->write_1D_integral(pmf_os);
     pmf_os << std::endl;
     pmf_os.close();
@@ -428,13 +436,13 @@ void colvarbias_abf::read_gradients_samples()
 
     cvm::log("Reading sample count from " + samples_in_name + " and gradients from " + gradients_in_name);
     is.open(samples_in_name.c_str());
-    if (!is.good()) cvm::error("Error opening ABF samples file " + samples_in_name + " for reading");
+    if (!is.is_open()) cvm::error("Error opening ABF samples file " + samples_in_name + " for reading");
     samples->read_multicol(is, true);
     is.close();
     is.clear();
 
     is.open(gradients_in_name.c_str());
-    if (!is.good())	cvm::error("Error opening ABF gradient file " + gradients_in_name + " for reading");
+    if (!is.is_open())	cvm::error("Error opening ABF gradient file " + gradients_in_name + " for reading");
     gradients->read_multicol(is, true);
     is.close();
   }
@@ -539,144 +547,4 @@ std::istream & colvarbias_abf::read_restart(std::istream& is)
     is.setstate(std::ios::failbit);
   }
   return is;
-}
-
-
-
-
-/// Histogram "bias" constructor
-
-colvarbias_histogram::colvarbias_histogram(std::string const &conf, char const *key)
-  : colvarbias(conf, key),
-    grid(NULL), out_name("")
-{
-  get_keyval(conf, "outputfreq", output_freq, cvm::restart_out_freq);
-
-  if ( output_freq == 0 ) {
-    cvm::error("User required histogram with zero output frequency");
-  }
-
-  grid   = new colvar_grid_count    (colvars);
-  bin.assign(colvars.size(), 0);
-
-  cvm::log("Finished histogram setup.\n");
-}
-
-/// Destructor
-colvarbias_histogram::~colvarbias_histogram()
-{
-  if (grid_os.good())	grid_os.close();
-
-  if (grid) {
-    delete grid;
-    grid = NULL;
-  }
-
-  if (cvm::n_histo_biases > 0)
-    cvm::n_histo_biases -= 1;
-}
-
-/// Update the grid
-cvm::real colvarbias_histogram::update()
-{
-  if (cvm::debug()) cvm::log("Updating Grid bias " + this->name);
-
-  // At the first timestep, we need to assign out_name since
-  // output_prefix is unset during the constructor
-
-  if (cvm::step_relative() == 0) {
-    out_name = cvm::output_prefix + "." + this->name + ".dat";
-    cvm::log("Histogram " + this->name + " will be written to file \"" + out_name + "\"");
-  }
-
-  for (size_t i=0; i<colvars.size(); i++) {
-    bin[i] = grid->current_bin_scalar(i);
-  }
-
-  if ( grid->index_ok(bin) ) {	  // Only within bounds of the grid...
-    grid->incr_count(bin);
-  }
-
-  if (output_freq && (cvm::step_absolute() % output_freq) == 0) {
-    if (cvm::debug()) cvm::log("Histogram bias trying to write grid to disk");
-
-    grid_os.open(out_name.c_str());
-    if (!grid_os.good()) cvm::error("Error opening histogram file " + out_name + " for writing");
-    grid->write_multicol(grid_os);
-    grid_os.close();
-  }
-  return 0.0; // no bias energy for histogram
-}
-
-
-std::istream & colvarbias_histogram::read_restart(std::istream& is)
-{
-  size_t const start_pos = is.tellg();
-
-  cvm::log("Restarting collective variable histogram \""+
-            this->name+"\".\n");
-  std::string key, brace, conf;
-
-  if ( !(is >> key)   || !(key == "histogram") ||
-       !(is >> brace) || !(brace == "{") ||
-       !(is >> colvarparse::read_block("configuration", conf)) ) {
-    cvm::log("Error: in reading restart configuration for histogram \""+
-              this->name+"\" at position "+
-              cvm::to_str(is.tellg())+" in stream.\n");
-    is.clear();
-    is.seekg(start_pos, std::ios::beg);
-    is.setstate(std::ios::failbit);
-    return is;
-  }
-
-  int id = -1;
-  std::string name = "";
-  if ( (colvarparse::get_keyval(conf, "name", name, std::string(""), colvarparse::parse_silent)) &&
-         (name != this->name) )
-    cvm::error("Error: in the restart file, the "
-                      "\"histogram\" block has a wrong name: different system?\n");
-  if ( (id == -1) && (name == "") ) {
-    cvm::error("Error: \"histogram\" block in the restart file "
-                      "has no name.\n");
-  }
-
-  if ( !(is >> key)   || !(key == "grid")) {
-    cvm::error("Error: in reading restart configuration for histogram \""+
-              this->name+"\" at position "+
-              cvm::to_str(is.tellg())+" in stream.\n");
-    is.clear();
-    is.seekg(start_pos, std::ios::beg);
-    is.setstate(std::ios::failbit);
-    return is;
-  }
-  if (! grid->read_raw(is)) {
-    is.clear();
-    is.seekg(start_pos, std::ios::beg);
-    is.setstate(std::ios::failbit);
-    return is;
-  }
-
-  is >> brace;
-  if (brace != "}") {
-    cvm::error("Error: corrupt restart information for ABF bias \""+
-                this->name+"\": no matching brace at position "+
-                cvm::to_str(is.tellg())+" in the restart file.\n");
-    is.setstate(std::ios::failbit);
-  }
-  return is;
-}
-
-std::ostream & colvarbias_histogram::write_restart(std::ostream& os)
-{
-  os << "histogram {\n"
-     << "  configuration {\n"
-     << "    name " << this->name << "\n";
-  os << "  }\n";
-
-  os << "grid\n";
-  grid->write_raw(os, 8);
-
-  os << "}\n\n";
-
-  return os;
 }

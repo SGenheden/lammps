@@ -59,7 +59,9 @@ enum{VERSION,SMALLINT,TAGINT,BIGINT,
      SPECIAL_LJ,SPECIAL_COUL,
      MASS,PAIR,BOND,ANGLE,DIHEDRAL,IMPROPER,
      MULTIPROC,MPIIO,PROCSPERFILE,PERPROC,
-     IMAGEINT};
+     IMAGEINT,BOUNDMIN,TIMESTEP,
+     ATOM_ID,ATOM_MAP_STYLE,ATOM_MAP_USER,ATOM_SORTFREQ,ATOM_SORTBIN,
+     COMM_MODE,COMM_CUTOFF,COMM_VEL};
 
 enum{IGNORE,WARN,ERROR};                    // same as thermo.cpp
 
@@ -113,11 +115,16 @@ void WriteRestart::command(int narg, char **arg)
   lmp->init();
 
   // move atoms to new processors before writing file
-  // do setup_pre_exchange to force update of per-atom info if needed
   // enforce PBC in case atoms are outside box
   // call borders() to rebuild atom map since exchange() destroys map
+  // NOTE: removed call to setup_pre_exchange
+  //   used to be needed by fixShearHistory for granular
+  //   to move history info from neigh list to atoms between runs
+  //   but now that is done via FIx::post_run()
+  //   don't think any other fix needs this or should do it
+  //   e.g. fix evaporate should not delete more atoms
 
-  modify->setup_pre_exchange();
+  // modify->setup_pre_exchange();
   if (domain->triclinic) domain->x2lamda(atom->nlocal);
   domain->pbc();
   domain->reset_box();
@@ -449,6 +456,14 @@ void WriteRestart::header()
   write_int(ZPERIODIC,domain->zperiodic);
   write_int_vec(BOUNDARY,6,&domain->boundary[0][0]);
 
+  // added field for shrink-wrap boundaries with minimum - 2 Jul 2015
+
+  double minbound[6];
+  minbound[0] = domain->minxlo; minbound[1] = domain->minxhi;
+  minbound[2] = domain->minylo; minbound[3] = domain->minyhi;
+  minbound[4] = domain->minzlo; minbound[5] = domain->minzhi;
+  write_double_vec(BOUNDMIN,6,minbound);
+
   // write atom_style and its args
 
   write_string(ATOM_STYLE,atom->atom_style);
@@ -483,6 +498,18 @@ void WriteRestart::header()
 
   write_double_vec(SPECIAL_LJ,3,&force->special_lj[1]);
   write_double_vec(SPECIAL_COUL,3,&force->special_coul[1]);
+
+  write_double(TIMESTEP,update->dt);
+
+  write_int(ATOM_ID,atom->tag_enable);
+  write_int(ATOM_MAP_STYLE,atom->map_style);
+  write_int(ATOM_MAP_USER,atom->map_user);
+  write_int(ATOM_SORTFREQ,atom->sortfreq);
+  write_double(ATOM_SORTBIN,atom->userbinsize);
+
+  write_int(COMM_MODE,comm->mode);  
+  write_double(COMM_CUTOFF,comm->cutghostuser);
+  write_int(COMM_VEL,comm->ghost_velocity);
 
   // -1 flag signals end of header
 

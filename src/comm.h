@@ -24,6 +24,7 @@ class Comm : protected Pointers {
   int layout;    // LAYOUT_UNIFORM = equal-sized bricks
                  // LAYOUT_NONUNIFORM = logical bricks, but diff sizes via LB
                  // LAYOUT_TILED = general tiling, due to RCB LB
+  int mode;      // 0 = single cutoff, 1 = multi-type cutoff
 
   int me,nprocs;                    // proc info
   int ghost_velocity;               // 1 if ghost atoms have velocity, 0 if not
@@ -107,7 +108,6 @@ class Comm : protected Pointers {
   int read_lines_from_file_universe(FILE *, int, int, char *);  
 
  protected:
-  int mode;                  // 0 = single cutoff, 1 = multi-type cutoff
   int bordergroup;           // only communicate this group in borders
 
   int triclinic;                    // 0 if domain is orthog, 1 if triclinic
@@ -141,5 +141,68 @@ class Comm : protected Pointers {
 #endif
 
 /* ERROR/WARNING messages:
+
+W: OMP_NUM_THREADS environment is not set.
+
+This environment variable must be set appropriately to use the
+USER-OMP pacakge.
+
+E: Illegal ... command
+
+Self-explanatory.  Check the input script syntax and compare to the
+documentation for the command.  You can use -echo screen as a
+command-line option when running LAMMPS to see the offending line.
+
+E: Invalid group in comm_modify command
+
+Self-explanatory.
+
+E: Comm_modify group != atom_modify first group
+
+Self-explanatory.
+
+E: Invalid cutoff in comm_modify command
+
+Specified cutoff must be >= 0.0.
+
+E: Specified processors != physical processors
+
+The 3d grid of processors defined by the processors command does not
+match the number of processors LAMMPS is being run on.
+
+E: Cannot use processors part command without using partitions
+
+See the command-line -partition switch.
+
+E: Invalid partitions in processors part command
+
+Valid partitions are numbered 1 to N and the sender and receiver
+cannot be the same partition.
+
+E: Sending partition in processors part command is already a sender
+
+Cannot specify a partition to be a sender twice.
+
+E: Receiving partition in processors part command is already a receiver
+
+Cannot specify a partition to be a receiver twice.
+
+E: Processors grid numa and map style are incompatible
+
+Using numa for gstyle in the processors command requires using
+cart for the map option.
+
+E: Processors part option and grid style are incompatible
+
+Cannot use gstyle numa or custom with the part option.
+
+E: Bad grid of processors
+
+The 3d grid of processors defined by the processors command does not
+match the number of processors LAMMPS is being run on.
+
+E: Processor count in z must be 1 for 2d simulation
+
+Self-explanatory.
 
 */

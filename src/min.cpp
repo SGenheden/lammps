@@ -182,8 +182,11 @@ void Min::init()
 
 void Min::setup()
 {
-  if (comm->me == 0 && screen) fprintf(screen,"Setting up minimization ...\n");
-
+  if (comm->me == 0 && screen) {
+    fprintf(screen,"Setting up %s style minimization ...\n",
+            update->minimize_style);
+    fprintf(screen,"  Unit style: %s\n", update->unit_style);
+  }
   update->setupflag = 1;
 
   // setup extra global dof due to fixes
@@ -418,6 +421,8 @@ void Min::run(int n)
 
 void Min::cleanup()
 {
+  modify->post_run();
+
   // stats for Finish to print
 
   efinal = ecurrent;

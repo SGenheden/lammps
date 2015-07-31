@@ -31,7 +31,7 @@ class PairTersoffMOD : public PairTersoff {
  
  protected:
   void read_file(char *);
-  void setup();
+  virtual void setup();
   double zeta(Param *, double, double, double *, double *);
 
   double ters_fc(double, Param *);
@@ -96,12 +96,10 @@ invalid.
 
 E: Potential file has duplicate entry
 
-The potential file for a SW or Tersoff potential has more than
-one entry for the same 3 ordered elements.
+The potential file has more than one entry for the same element.
 
 E: Potential file is missing an entry
 
-The potential file for a SW or Tersoff potential does not have a
-needed entry.
+The potential file does not have a needed entry.
 
 */

@@ -7,6 +7,7 @@
 :line
 
 dihedral_style opls command :h3
+dihedral_style opls/kk command :h3
 dihedral_style opls/omp command :h3
 
 [Syntax:]
@@ -69,7 +70,7 @@ more instructions on how to use the accelerated styles effectively.
 [Restrictions:]
 
 This dihedral style can only be used if LAMMPS was built with the
-MOLECULAR package (which it is by default).  See the "Making
+MOLECULE package (which it is by default).  See the "Making
 LAMMPS"_Section_start.html#start_3 section for more info on packages.
 
 [Related commands:]

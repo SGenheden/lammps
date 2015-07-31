@@ -230,7 +230,7 @@ void PPPM::init()
     int *p_typeA = (int *) force->pair->extract("typeA",itmp);
     int *p_typeB = (int *) force->pair->extract("typeB",itmp);
     if (!p_qdist || !p_typeO || !p_typeH || !p_typeA || !p_typeB)
-      error->all(FLERR,"Pair style is incompatible with KSpace style");
+      error->all(FLERR,"Pair style is incompatible with TIP4P KSpace style");
     qdist = *p_qdist;
     typeO = *p_typeO;
     typeH = *p_typeH;
@@ -257,7 +257,7 @@ void PPPM::init()
 
   scale = 1.0;
   qqrd2e = force->qqrd2e;
-  qsum_qsq(0);
+  qsum_qsq();
   natoms_original = atom->natoms;
 
   // set accuracy (force units) from accuracy_relative or accuracy_absolute
@@ -383,6 +383,16 @@ void PPPM::setup()
   if (triclinic) {
     setup_triclinic();
     return;
+  }
+
+  // perform some checks to avoid illegal boundaries with read_data
+
+  if (slabflag == 0 && domain->nonperiodic > 0)
+    error->all(FLERR,"Cannot use nonperiodic boundaries with PPPM");
+  if (slabflag) {
+    if (domain->xperiodic != 1 || domain->yperiodic != 1 ||
+        domain->boundary[2][0] != 1 || domain->boundary[2][1] != 1)
+      error->all(FLERR,"Incorrect boundaries with slab PPPM");
   }
 
   int i,j,k,n;
@@ -607,6 +617,17 @@ void PPPM::compute(int eflag, int vflag)
     cg_peratom->setup();
   }
 
+  // if atom count has changed, update qsum and qsqsum
+
+  if (atom->natoms != natoms_original) {
+    qsum_qsq();
+    natoms_original = atom->natoms;
+  }
+  
+  // return if there are no charges
+  
+  if (qsqsum == 0.0) return;
+  
   // convert atoms from box to lamda coords
 
   if (triclinic == 0) boxlo = domain->boxlo;
@@ -665,15 +686,6 @@ void PPPM::compute(int eflag, int vflag)
   // extra per-atom energy/virial communication
 
   if (evflag_atom) fieldforce_peratom();
-
-  // update qsum and qsqsum, if needed
-
-  if (eflag_global || eflag_atom) {
-    if (qsum_update_flag || (atom->natoms != natoms_original)) {
-      qsum_qsq(0);
-      natoms_original = atom->natoms;
-    }
-  }
 
   // sum global energy across procs and add in volume-dependent term
 

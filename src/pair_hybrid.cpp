@@ -37,8 +37,11 @@ PairHybrid::PairHybrid(LAMMPS *lmp) : Pair(lmp)
   styles = NULL;
   keywords = NULL;
   multiple = NULL;
+  special_lj = NULL;
+  special_coul = NULL;
 
   outerflag = 0;
+  respaflag = 0;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -46,12 +49,19 @@ PairHybrid::PairHybrid(LAMMPS *lmp) : Pair(lmp)
 PairHybrid::~PairHybrid()
 {
   if (nstyles) {
-    for (int m = 0; m < nstyles; m++) delete styles[m];
-    for (int m = 0; m < nstyles; m++) delete [] keywords[m];
+    for (int m = 0; m < nstyles; m++) {
+      delete styles[m];
+      delete [] keywords[m];
+      if (special_lj[m])   delete [] special_lj[m];
+      if (special_coul[m]) delete [] special_coul[m];
+    }
   }
   delete [] styles;
   delete [] keywords;
   delete [] multiple;
+
+  delete [] special_lj;
+  delete [] special_coul;
 
   delete [] svector;
 
@@ -99,23 +109,36 @@ void PairHybrid::compute(int eflag, int vflag)
   if (vflag % 4 == 2) vflag_substyle = vflag/4 * 4;
   else vflag_substyle = vflag;
 
-  // check if we are using respa run_style with hybrid keyword
-  bool respa_hybrid = strstr(update->integrate_style,"respa") && (((Respa*)update->integrate)->nhybrid_styles>0);
+  double *saved_special = save_special();
+
+  // check if we are running with r-RESPA using the hybrid keyword
+
+  Respa *respa = NULL;
+  if (strstr(update->integrate_style,"respa")) {
+    respa = (Respa *) update->integrate;
+    if (respa->nhybrid_styles > 0) respaflag = 1;
+  }
 
   for (m = 0; m < nstyles; m++) {
 
-	if (!respa_hybrid || (respa_hybrid && ((Respa*)update->integrate)->compute_style[m])) {
+    set_special(m);
 
-	  // invoke compute() unless
-	  // outerflag is set and sub-style has a compute_outer() method
+    if (!respaflag || (respaflag && respa->hybrid_compute[m])) {
 
-	  if (outerflag && styles[m]->respa_enable)
-	    styles[m]->compute_outer(eflag,vflag_substyle);
-	  else styles[m]->compute(eflag,vflag_substyle);
-	}
+      // invoke compute() unless compute flag is turned off or
+      // outerflag is set and sub-style has a compute_outer() method
 
-    if (respa_hybrid && !((Respa*)update->integrate)->tally_global)
-	  continue;
+      if (styles[m]->compute_flag == 0) continue;
+      if (outerflag && styles[m]->respa_enable) 
+        styles[m]->compute_outer(eflag,vflag_substyle);
+      else styles[m]->compute(eflag,vflag_substyle);
+    }
+
+    restore_special(saved_special);
+
+    // jump to next sub-style if r-RESPA does not want global accumulated data
+
+    if (respaflag && !respa->tally_global) continue;
 
     if (eflag_global) {
       eng_vdwl += styles[m]->eng_vdwl;
@@ -139,6 +162,8 @@ void PairHybrid::compute(int eflag, int vflag)
           vatom[i][j] += vatom_substyle[i][j];
     }
   }
+
+  delete [] saved_special;
 
   if (vflag_fdotr) virial_fdotr_compute();
 }
@@ -224,6 +249,9 @@ void PairHybrid::settings(int narg, char **arg)
   keywords = new char*[narg];
   multiple = new int[narg];
 
+  special_lj = new double*[narg];
+  special_coul = new double*[narg];
+
   // allocate each sub-style
   // allocate uses suffix, but don't store suffix version in keywords,
   //   else syntax in coeff() will not match
@@ -242,6 +270,7 @@ void PairHybrid::settings(int narg, char **arg)
 
     styles[nstyles] = force->new_pair(arg[iarg],1,dummy);
     force->store_style(keywords[nstyles],arg[iarg],0);
+    special_lj[nstyles] = special_coul[nstyles] = NULL;
 
     jarg = iarg + 1;
     while (jarg < narg && !force->pair_map->count(arg[jarg])) jarg++;
@@ -430,6 +459,29 @@ void PairHybrid::init_style()
     if (used == 0) error->all(FLERR,"Pair hybrid sub-style is not used");
   }
 
+  // check if special_lj/special_coul overrides are compatible
+
+  for (istyle = 0; istyle < nstyles; istyle++) {
+    if (special_lj[istyle]) {
+      for (i = 1; i < 4; ++i) {
+        if (((force->special_lj[i] == 0.0) || (force->special_lj[i] == 1.0))
+            && (force->special_lj[i] != special_lj[istyle][i]))
+          error->all(FLERR,"Pair_modify special setting incompatible with"
+                     " global special_bonds setting");
+      }
+    }
+
+    if (special_coul[istyle]) {
+      for (i = 1; i < 4; ++i) {
+        if (((force->special_coul[i] == 0.0)
+             || (force->special_coul[i] == 1.0))
+            && (force->special_coul[i] != special_coul[istyle][i]))
+          error->all(FLERR,"Pair_modify special setting incompatible with"
+                     "global special_bonds setting");
+      }
+    }
+  }
+
   // each sub-style makes its neighbor list request(s)
 
   for (istyle = 0; istyle < nstyles; istyle++) styles[istyle]->init_style();
@@ -440,7 +492,7 @@ void PairHybrid::init_style()
   for (i = 0; i < neighbor->nrequest; i++) {
     if (!neighbor->requests[i]->pair) continue;
 
-    // istyle = associated sub-style
+    // istyle = associated sub-style for that request
 
     for (istyle = 0; istyle < nstyles; istyle++)
       if (styles[istyle] == neighbor->requests[i]->requestor) break;
@@ -591,7 +643,7 @@ void PairHybrid::modify_requests()
 
     if (j < neighbor->nrequest) irq->otherlist = j;
     else {
-      int newrequest = neighbor->request(this);
+      int newrequest = neighbor->request(this,instance_me);
       neighbor->requests[newrequest]->copy_request(irq);
       irq->otherlist = newrequest;
     }
@@ -619,6 +671,13 @@ void PairHybrid::write_restart(FILE *fp)
     fwrite(&n,sizeof(int),1,fp);
     fwrite(keywords[m],sizeof(char),n,fp);
     styles[m]->write_restart_settings(fp);
+    // write out per style special settings, if present
+    n = (special_lj[m] == NULL) ? 0 : 1;
+    fwrite(&n,sizeof(int),1,fp);
+    if (n) fwrite(special_lj[m],sizeof(double),4,fp);
+    n = (special_coul[m] == NULL) ? 0 : 1;
+    fwrite(&n,sizeof(int),1,fp);
+    if (n) fwrite(special_coul[m],sizeof(double),4,fp);
   }
 }
 
@@ -638,6 +697,9 @@ void PairHybrid::read_restart(FILE *fp)
   keywords = new char*[nstyles];
   multiple = new int[nstyles];
 
+  special_lj = new double*[nstyles];
+  special_coul = new double*[nstyles];
+
   // each sub-style is created via new_pair()
   // each reads its settings, but no coeff info
 
@@ -650,6 +712,22 @@ void PairHybrid::read_restart(FILE *fp)
     MPI_Bcast(keywords[m],n,MPI_CHAR,0,world);
     styles[m] = force->new_pair(keywords[m],0,dummy);
     styles[m]->read_restart_settings(fp);
+    // read back per style special settings, if present
+    special_lj[m] = special_coul[m] = NULL;
+    if (me == 0) fread(&n,sizeof(int),1,fp);
+    MPI_Bcast(&n,1,MPI_INT,0,world);
+    if (n > 0 ) {
+      special_lj[m] = new double[4];
+      if (me == 0) fread(special_lj[m],sizeof(double),4,fp);
+      MPI_Bcast(special_lj[m],4,MPI_DOUBLE,0,world);
+    }
+    if (me == 0) fread(&n,sizeof(int),1,fp);
+    MPI_Bcast(&n,1,MPI_INT,0,world);
+    if (n > 0 ) {
+      special_coul[m] = new double[4];
+      if (me == 0) fread(special_coul[m],sizeof(double),4,fp);
+      MPI_Bcast(special_coul[m],4,MPI_DOUBLE,0,world);
+    }
   }
 
   // multiple[i] = 1 to M if sub-style used multiple times, else 0
@@ -690,6 +768,11 @@ double PairHybrid::single(int i, int j, int itype, int jtype,
       if (styles[map[itype][jtype][m]]->single_enable == 0)
         error->one(FLERR,"Pair hybrid sub-style does not support single call");
 
+      if ((special_lj[map[itype][jtype][m]] != NULL) ||
+          (special_coul[map[itype][jtype][m]] != NULL))
+        error->one(FLERR,"Pair hybrid single calls do not support"
+                   " per sub-style special bond values");
+
       esum += styles[map[itype][jtype][m]]->
         single(i,j,itype,jtype,rsq,factor_coul,factor_lj,fone);
       fforce += fone;
@@ -713,10 +796,7 @@ void PairHybrid::modify_params(int narg, char **arg)
 {
   if (narg == 0) error->all(FLERR,"Illegal pair_modify command");
 
-  // if 1st keyword is pair, then apply args to one sub-style
-  // else pass args to every sub-style
-  // also apply all args (except pair) to pair hybrid itself
-  //   important for some keywords like tail or compute
+  // if 1st keyword is pair, apply other keywords to one sub-style
 
   if (strcmp(arg[0],"pair") == 0) {
     if (narg < 2) error->all(FLERR,"Illegal pair_modify command");
@@ -724,23 +804,112 @@ void PairHybrid::modify_params(int narg, char **arg)
     for (m = 0; m < nstyles; m++)
       if (strcmp(arg[1],keywords[m]) == 0) break;
     if (m == nstyles) error->all(FLERR,"Unknown pair_modify hybrid sub-style");
-    if (multiple[m] == 0) {
-      Pair::modify_params(narg-2,&arg[2]);
-      styles[m]->modify_params(narg-2,&arg[2]);
-    } else {
+    int iarg = 2;
+
+    if (multiple[m]) {
       if (narg < 3) error->all(FLERR,"Illegal pair_modify command");
       int multiflag = force->inumeric(FLERR,arg[2]);
       for (m = 0; m < nstyles; m++)
         if (strcmp(arg[1],keywords[m]) == 0 && multiflag == multiple[m]) break;
       if (m == nstyles) 
         error->all(FLERR,"Unknown pair_modify hybrid sub-style");
-      Pair::modify_params(narg-2,&arg[3]);
-      styles[m]->modify_params(narg-3,&arg[3]);
+      iarg = 3;
     }
-    
+
+    // if 2nd keyword (after pair) is special:
+    // invoke modify_special() for the sub-style
+
+    if (iarg < narg && strcmp(arg[iarg],"special") == 0) {
+      if (iarg+4 < narg) 
+        error->all(FLERR,"Illegal pair_modify special command");
+      modify_special(m,narg-iarg,&arg[iarg]);
+      iarg += 4;
+    }
+
+    // apply all keywords (except pair and special) to pair hybrid itself
+    // important for some keywords like tail or compute
+
+    Pair::modify_params(narg-iarg,&arg[iarg]);
+    styles[m]->modify_params(narg-iarg,&arg[iarg]);
+
+  // apply all keywords to pair hybrid itself and every sub-style
+
   } else {
     Pair::modify_params(narg,arg);
     for (int m = 0; m < nstyles; m++) styles[m]->modify_params(narg,arg);
+  }
+}
+
+/* ----------------------------------------------------------------------
+   store a local per pair style override for special_lj and special_coul
+------------------------------------------------------------------------- */
+
+void PairHybrid::modify_special(int m, int narg, char **arg)
+{
+  double special[4];
+  int i;
+
+  special[0] = 1.0;
+  special[1] = force->numeric(FLERR,arg[1]);
+  special[2] = force->numeric(FLERR,arg[2]);
+  special[3] = force->numeric(FLERR,arg[3]);
+
+  if (strcmp(arg[0],"lj/coul") == 0) {
+    if (!special_lj[m]) special_lj[m] = new double[4];
+    if (!special_coul[m]) special_coul[m] = new double[4];
+    for (i = 0; i < 4; ++i)
+      special_lj[m][i] = special_coul[m][i] = special[i];
+
+  } else if (strcmp(arg[0],"lj") == 0) {
+    if (!special_lj[m]) special_lj[m] = new double[4];
+    for (i = 0; i < 4; ++i)
+      special_lj[m][i] = special[i];
+
+  } else if (strcmp(arg[0],"coul") == 0) {
+    if (!special_coul[m]) special_coul[m] = new double[4];
+    for (i = 0; i < 4; ++i)
+      special_coul[m][i] = special[i];
+
+  } else error->all(FLERR,"Illegal pair_modify special command");
+}
+
+/* ----------------------------------------------------------------------
+   override global special bonds settings with per substyle values
+------------------------------------------------------------------------- */
+
+void PairHybrid::set_special(int m)
+{
+  int i;
+  if (special_lj[m])
+    for (i = 0; i < 4; ++i) force->special_lj[i] = special_lj[m][i];
+  if (special_coul[m])
+    for (i = 0; i < 4; ++i) force->special_coul[i] = special_coul[m][i];
+}
+
+/* ----------------------------------------------------------------------
+   store global special settings
+------------------------------------------------------------------------- */
+
+double * PairHybrid::save_special()
+{
+  double *saved = new double[8];
+
+  for (int i = 0; i < 4; ++i) {
+    saved[i] = force->special_lj[i];
+    saved[i+4] = force->special_coul[i];
+  }
+  return saved;
+}
+
+/* ----------------------------------------------------------------------
+   restore global special settings from saved data
+------------------------------------------------------------------------- */
+
+void PairHybrid::restore_special(double *saved)
+{
+  for (int i = 0; i < 4; ++i) {
+    force->special_lj[i] = saved[i];
+    force->special_coul[i] = saved[i+4];
   }
 }
 

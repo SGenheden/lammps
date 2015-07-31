@@ -12,7 +12,8 @@
 ------------------------------------------------------------------------- */
 
 /* ----------------------------------------------------------------------
-   Contributing author: Paul Crozier (SNL)
+   Contributing authors: Paul Crozier (SNL)
+                         Alexander Stukowski
 ------------------------------------------------------------------------- */
 
 #include "math.h"
@@ -56,7 +57,7 @@ using namespace MathConst;
 FixAtomSwap::FixAtomSwap(LAMMPS *lmp, int narg, char **arg) :
   Fix(lmp, narg, arg)
 {
-  if (narg < 9) error->all(FLERR,"Illegal fix atom/swap command");
+  if (narg < 10) error->all(FLERR,"Illegal fix atom/swap command");
 
   dynamic_group_allow = 1;
     
@@ -71,22 +72,27 @@ FixAtomSwap::FixAtomSwap(LAMMPS *lmp, int narg, char **arg) :
 
   nevery = force->inumeric(FLERR,arg[3]);
   ncycles = force->inumeric(FLERR,arg[4]);
-  atom_swap_itype = force->inumeric(FLERR,arg[5]);
-  atom_swap_jtype = force->inumeric(FLERR,arg[6]);
-  seed = force->inumeric(FLERR,arg[7]); 
-  double temperature = force->numeric(FLERR,arg[8]);
+  seed = force->inumeric(FLERR,arg[5]); 
+  double temperature = force->numeric(FLERR,arg[6]);
   beta = 1.0/(force->boltz*temperature);   
 
   if (ncycles < 0) error->all(FLERR,"Illegal fix atom/swap command");
   if (seed <= 0) error->all(FLERR,"Illegal fix atom/swap command");
 
+  memory->create(delta_mu,atom->ntypes+1,"atom/swap:delta_mu");
+  for (int i = 1; i <= atom->ntypes; i++) delta_mu[i] = 0.0;
+  
   // read options from end of input line
 
-  options(narg-9,&arg[9]);
+  options(narg-7,&arg[7]);
 
   // random number generator, same for all procs
 
   random_equal = new RanPark(lmp,seed);
+
+  // random number generator, not the same for all procs
+
+  random_unequal = new RanPark(lmp,seed);
   
   // set up reneighboring
 
@@ -99,6 +105,7 @@ FixAtomSwap::FixAtomSwap(LAMMPS *lmp, int narg, char **arg) :
   nswap_successes = 0.0;
 
   atom_swap_nmax = 0;
+  local_swap_atom_list = NULL;
   local_swap_iatom_list = NULL;
   local_swap_jatom_list = NULL;
 
@@ -118,6 +125,10 @@ void FixAtomSwap::options(int narg, char **arg)
   if (narg < 0) error->all(FLERR,"Illegal fix atom/swap command");
 
   regionflag = 0; 
+  conserve_ke_flag = 1;
+  semi_grand_flag = 0;
+  ndeltamutypes = 0;
+  nswaptypes = 0;
   iregion = -1; 
   
   int iarg = 0;
@@ -132,6 +143,36 @@ void FixAtomSwap::options(int narg, char **arg)
       strcpy(idregion,arg[iarg+1]);
       regionflag = 1;
       iarg += 2;
+    } else if (strcmp(arg[iarg],"ke") == 0) {
+      if (iarg+2 > narg) error->all(FLERR,"Illegal fix atom/swap command");
+      if (strcmp(arg[iarg+1],"no") == 0) conserve_ke_flag = 0;
+      else if (strcmp(arg[iarg+1],"yes") == 0) conserve_ke_flag = 1;
+      else error->all(FLERR,"Illegal fix atom/swap command");
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"semi-grand") == 0) {
+      if (iarg+2 > narg) error->all(FLERR,"Illegal fix atom/swap command");
+      if (strcmp(arg[iarg+1],"no") == 0) semi_grand_flag = 0;
+      else if (strcmp(arg[iarg+1],"yes") == 0) semi_grand_flag = 1;
+      else error->all(FLERR,"Illegal fix atom/swap command");
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"types") == 0) {
+      if (iarg+3 > narg) error->all(FLERR,"Illegal fix atom/swap command");
+      iarg++;
+      memory->create(type_list,atom->ntypes,"atom/swap:type_list");
+      while (iarg < narg) {
+        if (isalpha(arg[iarg][0])) break;
+        type_list[nswaptypes++] = force->numeric(FLERR,arg[iarg]);
+        iarg++;
+      }
+    } else if (strcmp(arg[iarg],"delta_mu") == 0) {
+      if (iarg+2 > narg) error->all(FLERR,"Illegal fix atom/swap command");
+      iarg++;
+      while (iarg < narg) {
+        if (isalpha(arg[iarg][0])) break;
+        delta_mu[ndeltamutypes+2] = force->numeric(FLERR,arg[iarg]);
+        ndeltamutypes++;
+        iarg++;
+      }
     } else error->all(FLERR,"Illegal fix atom/swap command");
   }
 }
@@ -140,8 +181,13 @@ void FixAtomSwap::options(int narg, char **arg)
 
 FixAtomSwap::~FixAtomSwap()
 {
+  memory->destroy(type_list);
+  memory->destroy(delta_mu);
+  memory->destroy(qtype);
+  memory->destroy(sqrt_mass_ratio);
   if (regionflag) delete [] idregion;
   delete random_equal;
+  delete random_unequal;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -163,36 +209,53 @@ void FixAtomSwap::init()
 
   int *type = atom->type;
 
-  if ((atom_swap_itype <= 0 || atom_swap_itype > atom->ntypes) ||
-      (atom_swap_jtype <= 0 || atom_swap_jtype > atom->ntypes))
-    error->all(FLERR,"Invalid atom type in fix atom/swap command");
+  if (nswaptypes < 2)
+    error->all(FLERR,"Must specify at least 2 types in fix atom/swap command");
+    
+  if (semi_grand_flag) {
+    if (atom->ntypes-1 != ndeltamutypes)
+      error->all(FLERR,"Need ntypes-1 delta_mu values in fix atom/swap command");
+  } else {
+    if (nswaptypes != 2)
+      error->all(FLERR,"Only 2 types allowed when not using semi-grand in fix atom/swap command");
+    if (ndeltamutypes != 0)
+      error->all(FLERR,"Delta_mu not allowed when not using semi-grand in fix atom/swap command");
+  }
+  
+  for (int iswaptype = 0; iswaptype < nswaptypes; iswaptype++)
+    if (type_list[iswaptype] <= 0 || type_list[iswaptype] > atom->ntypes)
+      error->all(FLERR,"Invalid atom type in fix atom/swap command");
 
-  if (atom->q_flag) {
-    bool firsti = true;
-    bool firstj = true;
-    for (int i = 0; i < atom->nlocal; i++) {
-      if (type[i] == atom_swap_itype) {
-        if (firsti) qitype = atom->q[i];
-        firsti = false;
-        if (qitype != atom->q[i])
-          error->all(FLERR,"All atoms of a swapped type must have the same charge.");
-      } else if (type[i] == atom_swap_jtype) {
-        if (firstj) qjtype = atom->q[i];
-        firstj = false;
-        if (qjtype != atom->q[i])
-          error->all(FLERR,"All atoms of a swapped type must have the same charge.");
+  memory->create(qtype,nswaptypes,"atom/swap:qtype");
+  for (int iswaptype = 0; iswaptype < nswaptypes; iswaptype++) {
+    if (atom->q_flag) {
+      bool first = true;
+      for (int i = 0; i < atom->nlocal; i++) {
+        if (type[i] == type_list[iswaptype]) {
+          if (first) qtype[iswaptype] = atom->q[i];
+          first = false;
+          if (qtype[iswaptype] != atom->q[i])
+            error->all(FLERR,"All atoms of a swapped type must have the same charge.");
+        }
       }
     }
   }
+  
+  memory->create(sqrt_mass_ratio,atom->ntypes+1,atom->ntypes+1,"atom/swap:sqrt_mass_ratio");
+  for (int itype = 1; itype <= atom->ntypes; itype++)
+    for (int jtype = 1; jtype <= atom->ntypes; jtype++)
+      sqrt_mass_ratio[itype][jtype] = sqrt(atom->mass[itype]/atom->mass[jtype]);
   
   // check to see if itype and jtype cutoffs are the same
   // if not, reneighboring will be needed between swaps
   
   double **cutsq = force->pair->cutsq;
   unequal_cutoffs = false;
-  for (int ktype = 1; ktype <= atom->ntypes; ktype++)
-    if (cutsq[atom_swap_itype][ktype] != cutsq[atom_swap_jtype][ktype])
-      unequal_cutoffs = true;
+  for (int iswaptype = 0; iswaptype < nswaptypes; iswaptype++)
+    for (int jswaptype = 0; jswaptype < nswaptypes; jswaptype++)
+      for (int ktype = 1; ktype <= atom->ntypes; ktype++)
+        if (cutsq[type_list[iswaptype]][ktype] != cutsq[type_list[jswaptype]][ktype])
+          unequal_cutoffs = true;
   
   // check that no swappable atoms are in atom->firstgroup
   // swapping such an atom might not leave firstgroup atoms first
@@ -232,36 +295,131 @@ void FixAtomSwap::pre_exchange()
   neighbor->build();
   
   energy_stored = energy_full();
-  update_swap_atoms_list();
-
-  if ((niswap == 0) || (njswap == 0)) return;
   
   int nsuccess = 0;
-  for (int i = 0; i < ncycles; i++) nsuccess += attempt_swap();
+  if (semi_grand_flag) {
+    update_semi_grand_atoms_list();
+    for (int i = 0; i < ncycles; i++) nsuccess += attempt_semi_grand();
+  } else {
+    update_swap_atoms_list();
+    for (int i = 0; i < ncycles; i++) nsuccess += attempt_swap();
+  }
   
   nswap_attempts += ncycles;
   nswap_successes += nsuccess;
-  
+
+  energy_full();
   next_reneighbor = update->ntimestep + nevery;
 }
 
 /* ----------------------------------------------------------------------
 ------------------------------------------------------------------------- */
 
+int FixAtomSwap::attempt_semi_grand()
+{
+  if (nswap == 0) return 0;
+
+  double energy_before = energy_stored;
+
+  int itype,jtype,jswaptype;
+  double qtmp;
+
+  int i = pick_semi_grand_atom();
+  if (i >= 0) {
+    jswaptype = static_cast<int> (nswaptypes*random_unequal->uniform());
+    jtype = type_list[jswaptype];
+    itype = atom->type[i];
+    while (itype == jtype) {
+      jswaptype = static_cast<int> (nswaptypes*random_unequal->uniform());
+      jtype = type_list[jswaptype];
+    }
+    atom->type[i] = jtype;
+    if (atom->q_flag) { 
+      qtmp = atom->q[i];
+      atom->q[i] = qtype[jswaptype];
+    }
+  }
+  
+  if (unequal_cutoffs) {
+    if (domain->triclinic) domain->x2lamda(atom->nlocal);
+    domain->pbc();
+    comm->exchange();
+    comm->borders();
+    if (domain->triclinic) domain->lamda2x(atom->nlocal+atom->nghost);
+    if (modify->n_pre_neighbor) modify->pre_neighbor();
+    neighbor->build();
+  } else {
+    comm->forward_comm_fix(this);
+  }
+  
+  if (force->kspace) force->kspace->qsum_qsq();
+  double energy_after = energy_full();
+
+  int success = 0;
+  if (i >= 0) 
+    if (random_unequal->uniform() < 
+      exp(-beta*(energy_after - energy_before
+            + delta_mu[jtype] - delta_mu[itype]))) success = 1;
+  
+  int success_all = 0;
+  MPI_Allreduce(&success,&success_all,1,MPI_INT,MPI_MAX,world);
+  
+  if (success_all) {
+    update_semi_grand_atoms_list();
+    energy_stored = energy_after;
+    if (conserve_ke_flag) {
+      if (i >= 0) {
+        atom->v[i][0] *= sqrt_mass_ratio[itype][jtype];
+        atom->v[i][1] *= sqrt_mass_ratio[itype][jtype];
+        atom->v[i][2] *= sqrt_mass_ratio[itype][jtype];
+      }
+    }
+    return 1;
+  } else {
+    if (i >= 0) {
+      atom->type[i] = itype;
+      if (atom->q_flag) atom->q[i] = qtmp;
+    }
+    if (force->kspace) force->kspace->qsum_qsq();
+    energy_stored = energy_before;
+    
+    if (unequal_cutoffs) {
+      if (domain->triclinic) domain->x2lamda(atom->nlocal);
+      domain->pbc();
+      comm->exchange();
+      comm->borders();
+      if (domain->triclinic) domain->lamda2x(atom->nlocal+atom->nghost);
+      if (modify->n_pre_neighbor) modify->pre_neighbor();
+      neighbor->build();
+    } else {
+      comm->forward_comm_fix(this);
+    }
+  } 
+  return 0;
+}
+
+
+/* ----------------------------------------------------------------------
+------------------------------------------------------------------------- */
+
 int FixAtomSwap::attempt_swap()
 {
-  double energy_before = energy_stored;
+  if ((niswap == 0) || (njswap == 0)) return 0;
   
+  double energy_before = energy_stored;
+
   int i = pick_i_swap_atom();
   int j = pick_j_swap_atom();
-
+  int itype = type_list[0];
+  int jtype = type_list[1];
+  
   if (i >= 0) {
-    atom->type[i] = atom_swap_jtype;
-    if (atom->q_flag) atom->q[i] = qjtype;
+    atom->type[i] = jtype;
+    if (atom->q_flag) atom->q[i] = qtype[1];
   }
   if (j >= 0) {
-    atom->type[j] = atom_swap_itype;
-    if (atom->q_flag) atom->q[j] = qitype;
+    atom->type[j] = itype;
+    if (atom->q_flag) atom->q[j] = qtype[0];
   }
   
   if (unequal_cutoffs) {
@@ -282,18 +440,42 @@ int FixAtomSwap::attempt_swap()
       exp(beta*(energy_before - energy_after))) {
     update_swap_atoms_list();
     energy_stored = energy_after;
+    if (conserve_ke_flag) {
+      if (i >= 0) {
+        atom->v[i][0] *= sqrt_mass_ratio[itype][jtype];
+        atom->v[i][1] *= sqrt_mass_ratio[itype][jtype];
+        atom->v[i][2] *= sqrt_mass_ratio[itype][jtype];
+      }
+      if (j >= 0) {
+        atom->v[j][0] *= sqrt_mass_ratio[jtype][itype];
+        atom->v[j][1] *= sqrt_mass_ratio[jtype][itype];
+        atom->v[j][2] *= sqrt_mass_ratio[jtype][itype];
+      }
+    }
     return 1;
   } else {
     if (i >= 0) {
-      atom->type[i] = atom_swap_itype;
-      if (atom->q_flag) atom->q[i] = qitype;
+      atom->type[i] =  type_list[0];
+      if (atom->q_flag) atom->q[i] = qtype[0];
     }
     if (j >= 0) {
-      atom->type[j] = atom_swap_jtype;
-      if (atom->q_flag) atom->q[j] = qjtype;
+      atom->type[j] =  type_list[1];
+      if (atom->q_flag) atom->q[j] = qtype[1];
     }
     energy_stored = energy_before;
-  } 
+    
+    if (unequal_cutoffs) {
+      if (domain->triclinic) domain->x2lamda(atom->nlocal);
+      domain->pbc();
+      comm->exchange();
+      comm->borders();
+      if (domain->triclinic) domain->lamda2x(atom->nlocal+atom->nghost);
+      if (modify->n_pre_neighbor) modify->pre_neighbor();
+      neighbor->build();
+    } else {
+      comm->forward_comm_fix(this);
+    }
+  }
   return 0;
 }
 
@@ -306,6 +488,9 @@ double FixAtomSwap::energy_full()
   int eflag = 1;
   int vflag = 0;
 
+  if (modify->n_pre_neighbor) modify->pre_neighbor();
+  if (modify->n_pre_force) modify->pre_force(vflag);
+  
   if (force->pair) force->pair->compute(eflag,vflag);
 
   if (atom->molecular) {
@@ -316,12 +501,30 @@ double FixAtomSwap::energy_full()
   }
 
   if (force->kspace) force->kspace->compute(eflag,vflag);
- 
+  
+  if (modify->n_post_force) modify->post_force(vflag);
+  if (modify->n_end_of_step) modify->end_of_step();
+  
   update->eflag_global = update->ntimestep;
   double total_energy = c_pe->compute_scalar();
-  if (output->thermo->normflag) total_energy *= atom->natoms;
 
   return total_energy;
+}
+
+/* ----------------------------------------------------------------------
+------------------------------------------------------------------------- */
+
+int FixAtomSwap::pick_semi_grand_atom()
+{
+  int i = -1;
+  int iwhichglobal = static_cast<int> (nswap*random_equal->uniform());
+  if ((iwhichglobal >= nswap_before) &&
+      (iwhichglobal < nswap_before + nswap_local)) {
+    int iwhichlocal = iwhichglobal - nswap_before;
+    i = local_swap_atom_list[iwhichlocal];
+  }
+
+  return i;
 }
 
 /* ----------------------------------------------------------------------
@@ -360,6 +563,50 @@ int FixAtomSwap::pick_j_swap_atom()
    update the list of gas atoms
 ------------------------------------------------------------------------- */
 
+void FixAtomSwap::update_semi_grand_atoms_list()
+{
+  int nlocal = atom->nlocal;
+  double **x = atom->x;
+      
+  if (nlocal > atom_swap_nmax) {
+    memory->sfree(local_swap_atom_list);
+    atom_swap_nmax = atom->nmax;
+    local_swap_atom_list = (int *) memory->smalloc(atom_swap_nmax*sizeof(int),
+     "MCSWAP:local_swap_atom_list");
+  }
+
+  nswap_local = 0;
+  
+  if (regionflag) {
+  
+    for (int i = 0; i < nlocal; i++) {
+      if (domain->regions[iregion]->match(x[i][0],x[i][1],x[i][2]) == 1) {
+        if (atom->mask[i] & groupbit) {
+          local_swap_atom_list[nswap_local] = i;
+          nswap_local++;
+        }
+      }
+    }
+
+  } else {
+    for (int i = 0; i < nlocal; i++) {
+      if (atom->mask[i] & groupbit) {
+        local_swap_atom_list[nswap_local] = i;
+        nswap_local++;
+      }
+    }
+  }
+
+  MPI_Allreduce(&nswap_local,&nswap,1,MPI_INT,MPI_SUM,world);
+  MPI_Scan(&nswap_local,&nswap_before,1,MPI_INT,MPI_SUM,world);
+  nswap_before -= nswap_local;
+}
+
+
+/* ----------------------------------------------------------------------
+   update the list of gas atoms
+------------------------------------------------------------------------- */
+
 void FixAtomSwap::update_swap_atoms_list()
 {
   int nlocal = atom->nlocal;
@@ -384,10 +631,10 @@ void FixAtomSwap::update_swap_atoms_list()
     for (int i = 0; i < nlocal; i++) {
       if (domain->regions[iregion]->match(x[i][0],x[i][1],x[i][2]) == 1) {
         if (atom->mask[i] & groupbit) {
-          if (type[i] == atom_swap_itype) {
+          if (type[i] ==  type_list[0]) {
             local_swap_iatom_list[niswap_local] = i;
             niswap_local++;
-          } else if (type[i] == atom_swap_jtype) {
+          } else if (type[i] ==  type_list[1]) {
             local_swap_jatom_list[njswap_local] = i;
             njswap_local++;
           }
@@ -398,10 +645,10 @@ void FixAtomSwap::update_swap_atoms_list()
   } else {
     for (int i = 0; i < nlocal; i++) {
       if (atom->mask[i] & groupbit) {
-        if (type[i] == atom_swap_itype) {
+        if (type[i] ==  type_list[0]) {
           local_swap_iatom_list[niswap_local] = i;
           niswap_local++;
-        } else if (type[i] == atom_swap_jtype) {
+        } else if (type[i] ==  type_list[1]) {
           local_swap_jatom_list[njswap_local] = i;
           njswap_local++;
         }
@@ -498,6 +745,7 @@ void FixAtomSwap::write_restart(FILE *fp)
   int n = 0;
   double list[4];
   list[n++] = random_equal->state();
+  list[n++] = random_unequal->state();
   list[n++] = next_reneighbor;
 
   if (comm->me == 0) {
@@ -518,6 +766,9 @@ void FixAtomSwap::restart(char *buf)
 
   seed = static_cast<int> (list[n++]);
   random_equal->reset(seed);
+ 
+  seed = static_cast<int> (list[n++]);
+  random_unequal->reset(seed);
 
   next_reneighbor = static_cast<int> (list[n++]);
 }

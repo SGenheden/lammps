@@ -205,7 +205,7 @@ void PairComb3::coeff(int narg, char **arg)
   for (i = 3; i < narg; i++) {
     if ((strcmp(arg[i],"C") == 0) && (cflag == 0)) {
       if( comm->me == 0) fprintf(screen,
-      "	PairComb3: Found C: reading additional library file \n");
+      "	PairComb3: Found C: reading additional library file\n");
     read_lib();
     cflag = 1;
     }
@@ -266,7 +266,7 @@ void PairComb3::init_style()
     error->all(FLERR,"Pair style COMB3 requires atom attribute q");
 
   // need a full neighbor list
-  int irequest = neighbor->request(this);
+  int irequest = neighbor->request(this,instance_me);
   neighbor->requests[irequest]->half = 0;
   neighbor->requests[irequest]->full = 1;
   neighbor->requests[irequest]->ghost = 1;
@@ -316,15 +316,16 @@ void PairComb3::read_lib()
 
   // open libraray file on proc 0
 
-  if(comm->me == 0) {
+  if (comm->me == 0) {
     FILE *fp = force->open_potential("lib.comb3");
     if (fp == NULL) {
       char str[128];
-      sprintf(str,"Cannot open COMB3 C library file \n");
+      sprintf(str,"Cannot open COMB3 lib.comb3 file");
       error->one(FLERR,str);
     }
 
     // read and store at the same time
+    fgets(s,maxlib,fp);
     fgets(s,maxlib,fp);
     nwords = 0;
     words[nwords++] = strtok(s," \t\n\r\f");
@@ -2441,13 +2442,17 @@ void PairComb3::tables()
   // direct 1/r energy with Slater 1S orbital overlap
   
   for (i = 0; i < n; i++) {
+    if (map[i+1] < 0) continue;
     r = drin - dra; 
-    itype = i;
+    itype = map[i+1];
     iparam_i = elem2param[itype][itype][itype];
     z = params[iparam_i].esm;
     exp2ershift = exp(-2.0*z*rc);
     afbshift = -exp2ershift*(z+1.0/rc);
     dafbshift = exp2ershift*(2.0*z*z+2.0*z/rc+1.0/(rc*rc));
+
+    if (comm->me == 0 && screen)
+      fprintf(screen,"  element[%d] = %-2s, z = %g\n",i+1,elements[map[i+1]],z);
     
     for (j = 0; j < ncoul; j++) {
       exp2er = exp(-2.0 * z * r);
@@ -2460,10 +2465,12 @@ void PairComb3::tables()
   }
 
   for (i = 0; i < n; i ++) {
+    if (map[i+1] < 0) continue;
     for (j = 0; j < n; j ++) {
+      if (map[j+1] < 0) continue;
       r = drin - dra; 
       if (j == i) {
-        itype = i;
+        itype = map[i+1];
         inty = intype[itype][itype];
         iparam_i = elem2param[itype][itype][itype];
         z = params[iparam_i].esm;
@@ -2488,8 +2495,8 @@ void PairComb3::tables()
                   r += dra; 
         }
       } else if (j != i) {
-        itype = i;
-        jtype = j;
+        itype = map[i+1];
+        jtype = map[j+1];
         inty = intype[itype][jtype];
         iparam_ij = elem2param[itype][jtype][jtype];
         ea = params[iparam_ij].esm;
@@ -2572,9 +2579,9 @@ void PairComb3::tables()
                
         rvdw[1][inty] = params[iparam_ij].vsig * 0.950;
 
-        // radius check: outter radius vs. sigma
+        // radius check: outer radius vs. sigma
         if( rvdw[0][inty] > rvdw[1][inty] )
-          error->all(FLERR,"Error in vdw spline: inner radius > outter radius");
+          error->all(FLERR,"Error in vdw spline: inner radius > outer radius");
 
         rrc[0] = rvdw[1][inty];
 

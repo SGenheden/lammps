@@ -12,11 +12,11 @@
 ------------------------------------------------------------------------- */
 
 #include "stdlib.h"
+#include "string.h"
 #include "fix_respa.h"
 #include "atom.h"
-#include "memory.h"
-#include "error.h"
 #include "force.h"
+#include "memory.h"
 
 using namespace LAMMPS_NS;
 using namespace FixConst;
@@ -30,6 +30,13 @@ FixRespa::FixRespa(LAMMPS *lmp, int narg, char **arg) :
 
   nlevels = force->inumeric(FLERR,arg[3]);
   copy_torques = force->inumeric(FLERR,arg[4]);
+
+  // optional arguments
+  store_torque = 0;
+  for (int iarg=4; iarg < narg; ++iarg) {
+    if (strcmp(arg[iarg],"torque") == 0)
+       store_torque = 1;
+  }
 
   // perform initial allocation of atom-based arrays
   // register with Atom class
@@ -51,7 +58,7 @@ FixRespa::~FixRespa()
   // delete locally stored arrays
 
   memory->destroy(f_level);
-  if (copy_torques) memory->destroy(t_level);
+  if (store_torque) memory->destroy(t_level);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -68,7 +75,7 @@ int FixRespa::setmask()
 double FixRespa::memory_usage()
 {
   double bytes = atom->nmax*nlevels*3 * sizeof(double);
-  if (copy_torques) bytes = 2*bytes;
+  if (store_torque) bytes += atom->nmax*nlevels*3 * sizeof(double);
   return bytes;
 }
 
@@ -79,7 +86,7 @@ double FixRespa::memory_usage()
 void FixRespa::grow_arrays(int nmax)
 {
   memory->grow(f_level,nmax,nlevels,3,"fix_respa:f_level");
-  if (copy_torques) memory->grow(t_level,nmax,nlevels,3,"fix_respa:t_level");
+  if (store_torque) memory->grow(t_level,nmax,nlevels,3,"fix_respa:t_level");
 }
 
 /* ----------------------------------------------------------------------
@@ -93,7 +100,7 @@ void FixRespa::copy_arrays(int i, int j, int delflag)
     f_level[j][k][1] = f_level[i][k][1];
     f_level[j][k][2] = f_level[i][k][2];
   }
-  if (copy_torques) {
+  if (store_torque) {
     for (int k = 0; k < nlevels; k++) {
       t_level[j][k][0] = t_level[i][k][0];
       t_level[j][k][1] = t_level[i][k][1];
@@ -114,7 +121,7 @@ int FixRespa::pack_exchange(int i, double *buf)
     buf[m++] = f_level[i][k][1];
     buf[m++] = f_level[i][k][2];
   }
-  if (copy_torques) {
+  if (store_torque) {
     for (int k = 0; k < nlevels; k++) {
       buf[m++] = t_level[i][k][0];
       buf[m++] = t_level[i][k][1];
@@ -136,7 +143,7 @@ int FixRespa::unpack_exchange(int nlocal, double *buf)
     f_level[nlocal][k][1] = buf[m++];
     f_level[nlocal][k][2] = buf[m++];
   }
-  if (copy_torques) {
+  if (store_torque) {
     for (int k = 0; k < nlevels; k++) {
       t_level[nlocal][k][0] = buf[m++];
       t_level[nlocal][k][1] = buf[m++];

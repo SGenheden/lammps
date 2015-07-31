@@ -1,13 +1,13 @@
 /*
 //@HEADER
 // ************************************************************************
-//
-//   Kokkos: Manycore Performance-Portable Multidimensional Arrays
-//              Copyright (2012) Sandia Corporation
-//
+// 
+//                        Kokkos v. 2.0
+//              Copyright (2014) Sandia Corporation
+// 
 // Under the terms of Contract DE-AC04-94AL85000 with Sandia Corporation,
 // the U.S. Government retains certain rights in this software.
-//
+// 
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -36,7 +36,7 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
 // Questions? Contact  H. Carter Edwards (hcedwar@sandia.gov)
-//
+// 
 // ************************************************************************
 //@HEADER
 */
@@ -44,8 +44,8 @@
 #include <stdio.h>
 #include <limits>
 #include <iostream>
-#include <Kokkos_OpenMP.hpp>
-#include <Kokkos_hwloc.hpp>
+#include <vector>
+#include <Kokkos_Core.hpp>
 #include <impl/Kokkos_Error.hpp>
 #include <iostream>
 
@@ -84,7 +84,7 @@ int OpenMPexec::m_map_rank[ OpenMPexec::MAX_THREAD_COUNT ] = { 0 };
 
 int OpenMPexec::m_pool_topo[ 4 ] = { 0 };
 
-OpenMPexec * OpenMPexec::m_pool[ OpenMPexec::MAX_THREAD_COUNT ] = { 0 };
+OpenMPexec::Pool OpenMPexec::m_pool;
 
 void OpenMPexec::verify_is_process( const char * const label )
 {
@@ -109,18 +109,7 @@ void OpenMPexec::clear_scratch()
 #pragma omp parallel
   {
     const int rank_rev = m_map_rank[ omp_get_thread_num() ];
-
-#pragma omp critical
-    {
-      kokkos_omp_in_critical_region = 1 ;
-
-      m_pool[ rank_rev ]->~OpenMPexec();
-      HostSpace::decrement( m_pool[ rank_rev ] );
-      m_pool[ rank_rev ] = 0 ;
-
-      kokkos_omp_in_critical_region = 0 ;
-    }
-/* END #pragma omp critical */
+    m_pool.at(rank_rev).clear();
   }
 /* END #pragma omp parallel */
 }
@@ -158,17 +147,8 @@ void OpenMPexec::resize_scratch( size_t reduce_size , size_t thread_size )
       const int rank_rev = m_map_rank[ omp_get_thread_num() ];
       const int rank     = pool_size - ( rank_rev + 1 );
 
-#pragma omp critical
-      {
-        kokkos_omp_in_critical_region = 1 ;
-
-        m_pool[ rank_rev ] =
-          (OpenMPexec *) HostSpace::allocate( "openmp_scratch" , typeid(unsigned char) , 1 , alloc_size );
-        new( m_pool[ rank_rev ] ) OpenMPexec( rank , ALLOC_EXEC , reduce_size , thread_size );
-
-        kokkos_omp_in_critical_region = 0 ;
-      }
-/* END #pragma omp critical */
+      m_pool.at(rank_rev) = HostSpace::allocate_and_track( "openmp_scratch", alloc_size );
+      new ( m_pool[ rank_rev ] ) OpenMPexec( rank , ALLOC_EXEC , reduce_size , thread_size );
     }
 /* END #pragma omp parallel */
   }
@@ -191,7 +171,26 @@ void OpenMP::initialize( unsigned thread_count ,
                          unsigned use_numa_count ,
                          unsigned use_cores_per_numa )
 {
-  if(thread_count==0) thread_count = omp_get_max_threads();
+  // Before any other call to OMP query the maximum number of threads
+  // and save the value for re-initialization unit testing.
+
+  //Using omp_get_max_threads(); is problematic in conjunction with
+  //Hwloc on Intel (essentially an initial call to the OpenMP runtime
+  //without a parallel region before will set a process mask for a single core
+  //The runtime will than bind threads for a parallel region to other cores on the
+  //entering the first parallel region and make the process mask the aggregate of
+  //the thread masks. The intend seems to be to make serial code run fast, if you
+  //compile with OpenMP enabled but don't actually use parallel regions or so
+  //static int omp_max_threads = omp_get_max_threads();
+  int nthreads = 0;
+  #pragma omp parallel
+  {
+    #pragma omp atomic
+    nthreads++;
+  }
+
+  static int omp_max_threads = nthreads;
+
   const bool is_initialized = 0 != Impl::OpenMPexec::m_pool[0] ;
 
   bool thread_spawn_failed = false ;
@@ -206,6 +205,16 @@ void OpenMP::initialize( unsigned thread_count ,
                             ( 1 < Kokkos::hwloc::get_available_threads_per_core() ) );
 
     std::pair<unsigned,unsigned> threads_coord[ Impl::OpenMPexec::MAX_THREAD_COUNT ];
+
+    // If hwloc available then use it's maximum value.
+
+    if ( thread_count == 0 ) {
+      thread_count = Impl::s_using_hwloc
+      ? Kokkos::hwloc::get_available_numa_count() *
+        Kokkos::hwloc::get_available_cores_per_numa() *
+        Kokkos::hwloc::get_available_threads_per_core()
+      : omp_max_threads ;
+    }
 
     if(Impl::s_using_hwloc)
       hwloc::thread_mapping( "Kokkos::OpenMP::initialize" ,
@@ -264,6 +273,9 @@ void OpenMP::initialize( unsigned thread_count ,
 
     Kokkos::Impl::throw_runtime_exception(msg);
   }
+
+  // Init the array for used for arbitrarily sized atomics
+  Impl::init_lock_array_host_space();
 }
 
 //----------------------------------------------------------------------------
@@ -279,7 +291,7 @@ void OpenMP::finalize()
   Impl::OpenMPexec::m_pool_topo[1] = 0 ;
   Impl::OpenMPexec::m_pool_topo[2] = 0 ;
 
-  omp_set_num_threads(0);
+  omp_set_num_threads(1);
 
   if ( Impl::s_using_hwloc ) {
     hwloc::unbind_this_thread();
@@ -299,11 +311,11 @@ void OpenMP::print_configuration( std::ostream & s , const bool detail )
 #endif
 #if defined( KOKKOS_HAVE_HWLOC )
 
-  const unsigned numa_count       = Kokkos::hwloc::get_available_numa_count();
+  const unsigned numa_count_       = Kokkos::hwloc::get_available_numa_count();
   const unsigned cores_per_numa   = Kokkos::hwloc::get_available_cores_per_numa();
   const unsigned threads_per_core = Kokkos::hwloc::get_available_threads_per_core();
 
-  s << " hwloc[" << numa_count << "x" << cores_per_numa << "x" << threads_per_core << "]"
+  s << " hwloc[" << numa_count_ << "x" << cores_per_numa << "x" << threads_per_core << "]"
     << " hwloc_binding_" << ( Impl::s_using_hwloc ? "enabled" : "disabled" )
     ;
 #endif

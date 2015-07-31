@@ -37,7 +37,7 @@ protected:
   /// \brief Whether or not to accumulate data_begin_pos and
   /// data_end_pos in key_lookup(); it may be useful to disable
   /// this after the constructor is called, because other files may be
-  /// read (e.g. restart) that would mess up with the registry; in any
+  /// read (e.g. restart) that would mess up the registry; in any
   /// case, nothing serious happens until check_keywords() is invoked
   /// (which should happen only right after construction)
   bool save_delimiters;
@@ -48,11 +48,24 @@ protected:
   /// \brief Remove all the values from the config string
   void strip_values(std::string &conf);
 
+  /// \brief Configuration string of the object
+  std::string config_string;
+
 public:
 
   inline colvarparse()
     : save_delimiters(true)
   {}
+
+  /// Constructor that stores the object's config string
+  inline colvarparse(const std::string& conf)
+    : save_delimiters(true), config_string(conf)
+  {}
+
+  inline const std::string& get_config()
+  {
+      return config_string;
+  }
 
   /// How a keyword is parsed in a string
   enum Parse_Mode {
@@ -92,42 +105,47 @@ public:
   /// wrapper class (colvarvalue.h).
 
 #define _get_keyval_scalar_proto_(_type_,_def_value_)           \
-  bool get_keyval(std::string const &conf,                     \
-                   char const *key,                             \
-                   _type_ &value,                               \
-                   _type_ const &def_value = _def_value_,       \
-                   Parse_Mode const parse_mode = parse_normal)
+  bool get_keyval(std::string const &conf,                      \
+                  char const *key,                              \
+                  _type_ &value,                                \
+                  _type_ const &def_value = _def_value_,        \
+                  Parse_Mode const parse_mode = parse_normal)
 
-    _get_keyval_scalar_proto_(int, (int)0);
-    _get_keyval_scalar_proto_(size_t, (size_t)0);
-    _get_keyval_scalar_proto_(std::string, std::string(""));
-    _get_keyval_scalar_proto_(cvm::real, (cvm::real)0.0);
-    _get_keyval_scalar_proto_(cvm::rvector, cvm::rvector());
-    _get_keyval_scalar_proto_(cvm::quaternion, cvm::quaternion());
-    _get_keyval_scalar_proto_(colvarvalue, colvarvalue(colvarvalue::type_notset));
-    _get_keyval_scalar_proto_(bool, false);
+  _get_keyval_scalar_proto_(int, (int)0);
+  _get_keyval_scalar_proto_(size_t, (size_t)0);
+  _get_keyval_scalar_proto_(long, 0);
+  _get_keyval_scalar_proto_(std::string, std::string(""));
+  _get_keyval_scalar_proto_(cvm::real, (cvm::real)0.0);
+  _get_keyval_scalar_proto_(cvm::rvector, cvm::rvector());
+  _get_keyval_scalar_proto_(cvm::quaternion, cvm::quaternion());
+  _get_keyval_scalar_proto_(colvarvalue, colvarvalue(colvarvalue::type_notset));
+  _get_keyval_scalar_proto_(bool, false);
 
 #define _get_keyval_vector_proto_(_type_,_def_value_)                   \
-  bool get_keyval(std::string const &conf,                             \
-                   char const *key,                                     \
-                   std::vector<_type_> &values,                         \
-                   std::vector<_type_> const &def_values =              \
-                   std::vector<_type_> (0, static_cast<_type_>(_def_value_)),                \
-                   Parse_Mode const parse_mode = parse_normal)
+  bool get_keyval(std::string const &conf,                              \
+                  char const *key,                                      \
+                  std::vector<_type_> &values,                          \
+                  std::vector<_type_> const &def_values =               \
+                  std::vector<_type_> (0, static_cast<_type_>(_def_value_)), \
+                  Parse_Mode const parse_mode = parse_normal)
 
-    _get_keyval_vector_proto_(int, 0);
-    _get_keyval_vector_proto_(size_t, 0);
-    _get_keyval_vector_proto_(std::string, std::string(""));
-    _get_keyval_vector_proto_(cvm::real, 0.0);
-    _get_keyval_vector_proto_(cvm::rvector, cvm::rvector());
-    _get_keyval_vector_proto_(cvm::quaternion, cvm::quaternion());
-    _get_keyval_vector_proto_(colvarvalue, colvarvalue(colvarvalue::type_notset));
+  _get_keyval_vector_proto_(int, 0);
+  _get_keyval_vector_proto_(size_t, 0);
+  _get_keyval_vector_proto_(long, 0);
+  _get_keyval_vector_proto_(std::string, std::string(""));
+  _get_keyval_vector_proto_(cvm::real, 0.0);
+  _get_keyval_vector_proto_(cvm::rvector, cvm::rvector());
+  _get_keyval_vector_proto_(cvm::quaternion, cvm::quaternion());
+  _get_keyval_vector_proto_(colvarvalue, colvarvalue(colvarvalue::type_notset));
 
 
   /// \brief Check that all the keywords within "conf" are in the list
   /// of allowed keywords; this will invoke strip_values() first and
   /// then loop over all words
   int check_keywords(std::string &conf, char const *key);
+
+  /// \brief Use this after parsing a config string (note that check_keywords() calls it already)
+  void clear_keyword_registry();
 
 
   /// \brief Return a lowercased copy of the string

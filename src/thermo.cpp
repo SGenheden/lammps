@@ -306,7 +306,7 @@ void Thermo::compute(int flag)
   // check for lost atoms
   // turn off normflag if natoms = 0 to avoid divide by 0
 
-  natoms = lost_check();
+  natoms = atom->natoms = lost_check();
   if (natoms == 0) normflag = 0;
   else normflag = normvalue;
 
@@ -380,11 +380,8 @@ bigint Thermo::lost_check()
   if (ntotal == atom->natoms) return ntotal;
 
   // if not checking or already warned, just return
-  // reset total atom count
-
   if (lostflag == IGNORE) return ntotal;
   if (lostflag == WARN && lostbefore == 1) {
-    atom->natoms = ntotal;
     return ntotal;
   }
 
@@ -552,7 +549,7 @@ void Thermo::modify_params(int narg, char **arg)
         format_float_user = new char[n];
         strcpy(format_float_user,arg[iarg+2]);
       } else {
-        int i = atoi(arg[iarg+1]) - 1;
+        int i = force->inumeric(FLERR,arg[iarg+1]) - 1;
         if (i < 0 || i >= nfield_initial)
           error->all(FLERR,"Illegal thermo_modify command");
         if (format_user[i]) delete [] format_user[i];
@@ -860,14 +857,17 @@ void Thermo::parse_fields(char *str)
         if (argindex1[nfield] > 0 && argindex2[nfield] == 0) {
           if (modify->compute[n]->vector_flag == 0)
             error->all(FLERR,"Thermo compute does not compute vector");
-          if (argindex1[nfield] > modify->compute[n]->size_vector)
+          if (argindex1[nfield] > modify->compute[n]->size_vector &&
+              modify->compute[n]->size_vector_variable == 0)
             error->all(FLERR,"Thermo compute vector is accessed out-of-range");
         }
         if (argindex1[nfield] > 0 && argindex2[nfield] > 0) {
           if (modify->compute[n]->array_flag == 0)
             error->all(FLERR,"Thermo compute does not compute array");
-          if (argindex1[nfield] > modify->compute[n]->size_array_rows ||
-              argindex2[nfield] > modify->compute[n]->size_array_cols)
+          if (argindex1[nfield] > modify->compute[n]->size_array_rows &&
+              modify->compute[n]->size_array_rows_variable == 0)
+            error->all(FLERR,"Thermo compute array is accessed out-of-range");
+          if (argindex2[nfield] > modify->compute[n]->size_array_cols)
             error->all(FLERR,"Thermo compute array is accessed out-of-range");
         }
 
@@ -887,14 +887,17 @@ void Thermo::parse_fields(char *str)
         if (argindex1[nfield] > 0 && argindex2[nfield] == 0) {
           if (modify->fix[n]->vector_flag == 0)
             error->all(FLERR,"Thermo fix does not compute vector");
-          if (argindex1[nfield] > modify->fix[n]->size_vector)
+          if (argindex1[nfield] > modify->fix[n]->size_vector && 
+              modify->fix[n]->size_vector_variable == 0)
             error->all(FLERR,"Thermo fix vector is accessed out-of-range");
         }
         if (argindex1[nfield] > 0 && argindex2[nfield] > 0) {
           if (modify->fix[n]->array_flag == 0)
             error->all(FLERR,"Thermo fix does not compute array");
-          if (argindex1[nfield] > modify->fix[n]->size_array_rows ||
-              argindex2[nfield] > modify->fix[n]->size_array_cols)
+          if (argindex1[nfield] > modify->fix[n]->size_array_rows &&
+              modify->fix[n]->size_array_rows_variable == 0)
+            error->all(FLERR,"Thermo fix array is accessed out-of-range");
+          if (argindex2[nfield] > modify->fix[n]->size_array_cols)
             error->all(FLERR,"Thermo fix array is accessed out-of-range");
         }
 
@@ -1419,18 +1422,24 @@ void Thermo::compute_compute()
   int m = field2index[ifield];
   Compute *compute = computes[m];
 
+  // check for out-of-range access if vector/array is variable length
+
   if (compute_which[m] == SCALAR) {
     dvalue = compute->scalar;
     if (normflag && compute->extscalar) dvalue /= natoms;
   } else if (compute_which[m] == VECTOR) {
-    dvalue = compute->vector[argindex1[ifield]-1];
+    if (compute->size_vector_variable && argindex1[ifield] > 
+        compute->size_vector) dvalue = 0.0;
+    else dvalue = compute->vector[argindex1[ifield]-1];
     if (normflag) {
       if (compute->extvector == 0) return;
       else if (compute->extvector == 1) dvalue /= natoms;
       else if (compute->extlist[argindex1[ifield]-1]) dvalue /= natoms;
     }
   } else {
-    dvalue = compute->array[argindex1[ifield]-1][argindex2[ifield]-1];
+    if (compute->size_array_rows_variable && argindex1[ifield] > 
+        compute->size_array_rows) dvalue = 0.0;
+    else dvalue = compute->array[argindex1[ifield]-1][argindex2[ifield]-1];
     if (normflag && compute->extarray) dvalue /= natoms;
   }
 }

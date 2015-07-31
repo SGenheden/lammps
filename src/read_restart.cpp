@@ -60,7 +60,9 @@ enum{VERSION,SMALLINT,TAGINT,BIGINT,
      SPECIAL_LJ,SPECIAL_COUL,
      MASS,PAIR,BOND,ANGLE,DIHEDRAL,IMPROPER,
      MULTIPROC,MPIIO,PROCSPERFILE,PERPROC,
-     IMAGEINT};
+     IMAGEINT,BOUNDMIN,TIMESTEP,
+     ATOM_ID,ATOM_MAP_STYLE,ATOM_MAP_USER,ATOM_SORTFREQ,ATOM_SORTBIN,
+     COMM_MODE,COMM_CUTOFF,COMM_VEL};
 
 #define LB_FACTOR 1.1
 
@@ -710,10 +712,14 @@ void ReadRestart::header(int incompatible)
       int procgrid[3];
       read_int();
       read_int_vec(3,procgrid);
+      int flag = 0;
       if (comm->user_procgrid[0] != 0 &&
-          (procgrid[0] != comm->user_procgrid[0] || 
-           procgrid[1] != comm->user_procgrid[1] ||
-           procgrid[2] != comm->user_procgrid[2]) && me == 0)
+          procgrid[0] != comm->user_procgrid[0]) flag = 1;
+      if (comm->user_procgrid[1] != 0 &&
+          procgrid[1] != comm->user_procgrid[1]) flag = 1;
+      if (comm->user_procgrid[2] != 0 &&
+          procgrid[2] != comm->user_procgrid[2]) flag = 1;
+      if (flag && me == 0) 
         error->warning(FLERR,"Restart file used different 3d processor grid");
 
     // don't set newton_pair, leave input script value unchanged
@@ -790,6 +796,14 @@ void ReadRestart::header(int incompatible)
           domain->nonperiodic = 2;
       }
 
+    } else if (flag == BOUNDMIN) {
+      double minbound[6];
+      read_int();
+      read_double_vec(6,minbound);
+      domain->minxlo = minbound[0]; domain->minxhi = minbound[1];
+      domain->minylo = minbound[2]; domain->minyhi = minbound[3];
+      domain->minzlo = minbound[4]; domain->minzhi = minbound[5];
+
     // create new AtomVec class using any stored args
 
     } else if (flag == ATOM_STYLE) {
@@ -853,6 +867,27 @@ void ReadRestart::header(int incompatible)
     } else if (flag == SPECIAL_COUL) {
       read_int();
       read_double_vec(3,&force->special_coul[1]);
+
+    } else if (flag == TIMESTEP) {
+      update->dt = read_double();
+
+    } else if (flag == ATOM_ID) {
+      atom->tag_enable = read_int();
+    } else if (flag == ATOM_MAP_STYLE) {
+      atom->map_style = read_int();
+    } else if (flag == ATOM_MAP_USER) {
+      atom->map_user  = read_int();
+    } else if (flag == ATOM_SORTFREQ) {
+      atom->sortfreq = read_int();
+    } else if (flag == ATOM_SORTBIN) {
+      atom->userbinsize = read_double();
+      
+    } else if (flag == COMM_MODE) {
+      comm->mode = read_int();
+    } else if (flag == COMM_CUTOFF) {
+      comm->cutghostuser = read_double();
+    } else if (flag == COMM_VEL) {
+      comm->ghost_velocity = read_int();
 
     } else error->all(FLERR,"Invalid flag in header section of restart file");
 

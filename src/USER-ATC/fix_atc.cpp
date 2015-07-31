@@ -43,6 +43,10 @@ using namespace LAMMPS_NS;
 using namespace FixConst;
 using std::string;
 
+#ifdef LAMMPS_BIGBIG
+#error "The USER-ATC package is not compatible with -DLAMMPS_BIGBIG"
+#endif
+
 // main page of doxygen documentation
 /*! \mainpage AtC : Atom-to-Continuum methods
     fix commands:
@@ -564,7 +568,7 @@ int FixATC::modify_param(int narg, char** arg)
 void FixATC::init()
 {
   // Guarantee construction of full neighborlist
-  int irequest = neighbor->request((void *) this);
+  int irequest = neighbor->request(this,instance_me);
   neighbor->requests[irequest]->pair = 0;
   neighbor->requests[irequest]->fix = 1;
   neighbor->requests[irequest]->half = 0;

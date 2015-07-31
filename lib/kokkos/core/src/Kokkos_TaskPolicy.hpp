@@ -3,8 +3,8 @@
 //@HEADER
 // ************************************************************************
 // 
-//   Kokkos: Manycore Performance-Portable Multidimensional Arrays
-//              Copyright (2012) Sandia Corporation
+//                        Kokkos v. 2.0
+//              Copyright (2014) Sandia Corporation
 // 
 // Under the terms of Contract DE-AC04-94AL85000 with Sandia Corporation,
 // the U.S. Government retains certain rights in this software.
@@ -36,7 +36,7 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
-// Questions? Contact  H. Carter Edwards (hcedwar@sandia.gov) 
+// Questions? Contact  H. Carter Edwards (hcedwar@sandia.gov)
 // 
 // ************************************************************************
 //@HEADER
@@ -47,42 +47,49 @@
 #ifndef KOKKOS_TASKPOLICY_HPP
 #define KOKKOS_TASKPOLICY_HPP
 
-#include <Kokkos_Macros.hpp>
+#include <Kokkos_Core_fwd.hpp>
 #include <impl/Kokkos_Traits.hpp>
 #include <impl/Kokkos_Tags.hpp>
 #include <impl/Kokkos_StaticAssert.hpp>
+#include <impl/Kokkos_AllocationTracker.hpp>
 
 //----------------------------------------------------------------------------
 
 namespace Kokkos {
+namespace Experimental {
 namespace Impl {
 
 struct FutureValueTypeIsVoidError {};
 
-template< class ExecSpace >
-class TaskManager ;
-
-template < class Policy , class ResultType = void , class Functor = void >
+template < class ExecSpace , class ResultType , class FunctorType >
 class TaskMember ;
 
-template< class ExecPolicy >
-struct TaskDepends { typedef typename ExecPolicy::execution_space  execution_space ; };
+template< class ExecPolicy , class ResultType , class FunctorType >
+class TaskForEach ;
 
-template< class ExecPolicy >
-struct TaskForEach { typedef typename ExecPolicy::execution_space  execution_space ; };
+template< class ExecPolicy , class ResultType , class FunctorType >
+class TaskReduce ;
 
-template< class ExecPolicy >
-struct TaskReduce { typedef typename ExecPolicy::execution_space  execution_space ; };
-
-template< class ExecPolicy >
-struct TaskScan { typedef typename ExecPolicy::execution_space  execution_space ; };
+template< class ExecPolicy , class ResultType , class FunctorType >
+struct TaskScan ;
 
 } /* namespace Impl */
+} /* namespace Experimental */
 } /* namespace Kokkos */
 
 //----------------------------------------------------------------------------
 
 namespace Kokkos {
+namespace Experimental {
+
+/**\brief  States of a task */
+enum TaskState
+  { TASK_STATE_NULL         = 0  ///<  Does not exist
+  , TASK_STATE_CONSTRUCTING = 1  ///<  Is under construction
+  , TASK_STATE_WAITING      = 2  ///<  Is waiting for execution
+  , TASK_STATE_EXECUTING    = 4  ///<  Is executing
+  , TASK_STATE_COMPLETE     = 8  ///<  Execution is complete
+  };
 
 /**
  *
@@ -95,36 +102,36 @@ template< class Arg1 = void , class Arg2 = void >
 class Future {
 private:
 
-  template< class > friend class Impl::TaskManager ;
+  template< class , class , class > friend class Impl::TaskMember ;
+  template< class > friend class TaskPolicy ;
   template< class , class > friend class Future ;
 
   // Argument #2, if not void, must be the space.
-  enum { Arg1_is_space  = Impl::is_execution_space< Arg1 >::value };
-  enum { Arg2_is_space  = Impl::is_execution_space< Arg2 >::value };
-  enum { Arg2_is_void   = Impl::is_same< Arg2 , void >::value };
+  enum { Arg1_is_space  = Kokkos::Impl::is_execution_space< Arg1 >::value };
+  enum { Arg2_is_space  = Kokkos::Impl::is_execution_space< Arg2 >::value };
+  enum { Arg2_is_void   = Kokkos::Impl::is_same< Arg2 , void >::value };
 
   struct ErrorNoExecutionSpace {};
 
   enum { Opt1  =   Arg1_is_space && Arg2_is_void
        , Opt2  = ! Arg1_is_space && Arg2_is_void
-       , Opt3  = ! Arg1_is_space && Arg2_is_space 
-       , OptOK = Impl::StaticAssert< Opt1 || Opt2 || Opt3 , ErrorNoExecutionSpace >::value
+       , Opt3  = ! Arg1_is_space && Arg2_is_space
+       , OptOK = Kokkos::Impl::StaticAssert< Opt1 || Opt2 || Opt3 , ErrorNoExecutionSpace >::value
        };
 
   typedef typename
-    Impl::if_c< Opt2 || Opt3 , Arg1 , void >::type
+    Kokkos::Impl::if_c< Opt2 || Opt3 , Arg1 , void >::type
       ValueType ;
 
   typedef typename
-    Impl::if_c< Opt1 , Arg1 , typename
-    Impl::if_c< Opt2 , Kokkos::DefaultExecutionSpace , typename
-    Impl::if_c< Opt3 , Arg2 , void
+    Kokkos::Impl::if_c< Opt1 , Arg1 , typename
+    Kokkos::Impl::if_c< Opt2 , Kokkos::DefaultExecutionSpace , typename
+    Kokkos::Impl::if_c< Opt3 , Arg2 , void
     >::type >::type >::type
       ExecutionSpace ;
 
-  typedef Impl::TaskManager< ExecutionSpace >              TaskManager ;
-  typedef Impl::TaskMember<  ExecutionSpace >              TaskRoot ;
-  typedef Impl::TaskMember<  ExecutionSpace , ValueType >  TaskValue ;
+  typedef Impl::TaskMember< ExecutionSpace , void , void >       TaskRoot ;
+  typedef Impl::TaskMember< ExecutionSpace , ValueType , void >  TaskValue ;
 
   TaskRoot * m_task ;
 
@@ -135,15 +142,21 @@ public:
 
   //----------------------------------------
 
+  KOKKOS_INLINE_FUNCTION
+  TaskState get_task_state() const
+    { return 0 != m_task ? m_task->get_state() : TASK_STATE_NULL ; }
+
+  //----------------------------------------
+
   explicit
   Future( TaskRoot * task )
     : m_task(0)
-    { TaskManager::assign( & m_task , TaskValue::verify_type( task ) ); }
+    { TaskRoot::assign( & m_task , TaskRoot::template verify_type< value_type >( task ) ); }
 
   //----------------------------------------
 
   KOKKOS_INLINE_FUNCTION
-  ~Future() { TaskManager::assign( & m_task , 0 ); }
+  ~Future() { TaskRoot::assign( & m_task , 0 ); }
 
   //----------------------------------------
 
@@ -153,11 +166,11 @@ public:
   KOKKOS_INLINE_FUNCTION
   Future( const Future & rhs )
     : m_task(0)
-    { TaskManager::assign( & m_task , rhs.m_task ); }
+    { TaskRoot::assign( & m_task , rhs.m_task ); }
 
   KOKKOS_INLINE_FUNCTION
   Future & operator = ( const Future & rhs )
-    { TaskManager::assign( & m_task , rhs.m_task ); return *this ; }
+    { TaskRoot::assign( & m_task , rhs.m_task ); return *this ; }
 
   //----------------------------------------
 
@@ -165,84 +178,198 @@ public:
   KOKKOS_INLINE_FUNCTION
   Future( const Future<A1,A2> & rhs )
     : m_task(0)
-    { TaskManager::assign( & m_task , TaskValue::verify_type( rhs.m_task ) ); }
+    { TaskRoot::assign( & m_task , TaskRoot::template verify_type< value_type >( rhs.m_task ) ); }
 
   template< class A1 , class A2 >
   KOKKOS_INLINE_FUNCTION
   Future & operator = ( const Future<A1,A2> & rhs )
-    { TaskManager::assign( & m_task , TaskValue::verify_type( rhs.m_task ) ); return *this ; }
+    { TaskRoot::assign( & m_task , TaskRoot::template verify_type< value_type >( rhs.m_task ) ); return *this ; }
 
   //----------------------------------------
 
   typedef typename TaskValue::get_result_type get_result_type ;
 
   KOKKOS_INLINE_FUNCTION
-  typename TaskValue::get_result_type get() const
+  get_result_type get() const
     { return static_cast<TaskValue*>( m_task )->get(); }
 };
 
+namespace Impl {
+
+template< class T >
+struct is_future : public Kokkos::Impl::bool_< false > {};
+
+template< class Arg0 , class Arg1 >
+struct is_future< Kokkos::Experimental::Future<Arg0,Arg1> > : public Kokkos::Impl::bool_< true > {};
+
+} /* namespace Impl */
+} /* namespace Experimental */
 } /* namespace Kokkos */
 
 //----------------------------------------------------------------------------
+//----------------------------------------------------------------------------
 
 namespace Kokkos {
+namespace Experimental {
 
-template< class Policy = Kokkos::DefaultExecutionSpace >
+/** \brief  If the argument is an execution space then a serial task in that space */
+template< class Arg0 = Kokkos::DefaultExecutionSpace >
 class TaskPolicy {
 public:
 
-  typedef typename Policy::execution_space  execution_space ;
+  typedef typename Arg0::execution_space  execution_space ;
 
-  template< class A1 , class A2 >
-  void wait( const Future<A1,A2> & ) const ;
-
+  //----------------------------------------
+  /** \brief  Create a serial task with storage for dependences.
+   *
+   *  Postcondition: Task is in the 'constructing' state.
+   */
   template< class FunctorType >
   Future< typename FunctorType::value_type , execution_space >
-  spawn( const FunctorType & ) const ;
+  create( const FunctorType & functor
+        , const unsigned      dependence_capacity /* = default */ ) const ;
 
+  /** \brief  Create a foreach task with storage for dependences. */
+  template< class ExecPolicy , class FunctorType >
+  Future< typename FunctorType::value_type , execution_space >
+  create_foreach( const ExecPolicy  & policy
+                , const FunctorType & functor
+                , const unsigned      dependence_capacity /* = default */ ) const ;
+
+  /** \brief  Create a reduce task with storage for dependences. */
+  template< class ExecPolicy , class FunctorType >
+  Future< typename FunctorType::value_type , execution_space >
+  create_reduce( const ExecPolicy  & policy
+               , const FunctorType & functor
+               , const unsigned      dependence_capacity /* = default */ ) const ;
+
+  /** \brief  Create a scan task with storage for dependences. */
+  template< class ExecPolicy , class FunctorType >
+  Future< typename FunctorType::value_type , execution_space >
+  create_scan( const ExecPolicy  & policy
+             , const FunctorType & functor
+             , const unsigned      dependence_capacity /* = default */ ) const ;
+
+  /** \brief  Set dependence that 'after' cannot start execution
+   *          until 'before' has completed.
+   *
+   *  Precondition: The 'after' task must be in then 'Constructing' state.
+   */
+  template< class TA , class TB >
+  void set_dependence( const Future<TA,execution_space> & after
+                     , const Future<TB,execution_space> & before ) const ;
+
+  /** \brief  Spawn a task in the 'Constructing' state
+   *
+   *  Precondition:  Task is in the 'constructing' state.
+   *  Postcondition: Task is waiting, executing, or complete.
+   */
+  template< class T >
+  const Future<T,execution_space> &
+  spawn( const Future<T,execution_space> & ) const ;
+
+  //----------------------------------------
+  /** \brief  Query dependence of an executing task */
+
+  template< class FunctorType >
+  Future< execution_space >
+  get_dependence( FunctorType * , const int ) const ;
+
+  //----------------------------------------
+  /** \brief  Clear current dependences of an executing task
+   *          in preparation for setting new dependences and
+   *          respawning.
+   *
+   * Precondition: The functor must be a task in the executing state.
+   */
+  template< class FunctorType >
+  void clear_dependence( FunctorType * ) const ;
+
+  /** \brief  Set dependence that 'after' cannot start execution
+   *          until 'before' has completed.
+   *
+   *  The 'after' functor must be in the executing state
+   */
+  template< class FunctorType , class TB >
+  void set_dependence( FunctorType * after
+                     , const Future<TB,execution_space> & before ) const ;
+
+  /** \brief  Respawn (reschedule) an executing task to be called again
+   *          after all dependences have completed.
+   */
   template< class FunctorType >
   void respawn( FunctorType * ) const ;
-
-  template< class FunctorType >
-  Future< void , execution_space >
-  get_dependence( FunctorType * ) const ;
-
-  template< class ValueType >
-  TaskPolicy< void /* ... */ >
-  depends( const Future< ValueType , execution_space > * const , const int );
-
-  template< class ExecPolicy >
-  TaskPolicy< void /* ... */ > foreach( const ExecPolicy & );
-
-  template< class ExecPolicy >
-  TaskPolicy< void /* ... */ > reduce( const ExecPolicy & );
-
-  template< class ExecPolicy >
-  TaskPolicy< void /* ... */ > scan( const ExecPolicy & );
 };
 
-// spawn( M.depends(n,d).foreach(K) , functor );
-// M.depends(n,d).foreach(K).spawn( functor );
-
-template< class PolicyType , class FunctorType >
-Future< typename FunctorType::value_type
-      , typename PolicyType::execution_space >
+//----------------------------------------------------------------------------
+/** \brief  Create and spawn a single-thread task */
+template< class ExecSpace , class FunctorType >
 inline
-spawn( const TaskPolicy< PolicyType > & policy
-     , const FunctorType              & functor )
-{ return policy.spawn( functor ); }
+Future< typename FunctorType::value_type , ExecSpace >
+spawn( TaskPolicy<ExecSpace> & policy , const FunctorType & functor )
+{ return policy.spawn( policy.create( functor ) ); }
 
-template< class PolicyType , class A1 , class A2 >
-void wait( const TaskPolicy< PolicyType > & policy 
-         , const Future<A1,A2>            & future
-         , typename Impl::enable_if<
-             Impl::is_same< typename PolicyType::execution_space
-                          , typename Future<A1,A2>::execution_space >::value
-          >::type * = 0 )
-{ policy.wait( future ); }
+/** \brief  Create and spawn a single-thread task with dependences */
+template< class ExecSpace , class FunctorType , class Arg0 , class Arg1 >
+inline
+Future< typename FunctorType::value_type , ExecSpace >
+spawn( TaskPolicy<ExecSpace>   & policy
+     , const FunctorType       & functor
+     , const Future<Arg0,Arg1> & before_0
+     , const Future<Arg0,Arg1> & before_1 )
+{
+  Future< typename FunctorType::value_type , ExecSpace > f ;
+  f = policy.create( functor , 2 );
+  policy.add_dependence( f , before_0 );
+  policy.add_dependence( f , before_1 );
+  policy.spawn( f );
+  return f ;
+}
 
+//----------------------------------------------------------------------------
+/** \brief  Create and spawn a parallel_for task */
+template< class ExecSpace , class ParallelPolicyType , class FunctorType >
+inline
+Future< typename FunctorType::value_type , ExecSpace >
+spawn_foreach( TaskPolicy<ExecSpace>     & task_policy
+             , const ParallelPolicyType  & parallel_policy
+             , const FunctorType         & functor )
+{ return task_policy.spawn( task_policy.create_foreach( parallel_policy , functor ) ); }
+
+/** \brief  Create and spawn a parallel_reduce task */
+template< class ExecSpace , class ParallelPolicyType , class FunctorType >
+inline
+Future< typename FunctorType::value_type , ExecSpace >
+spawn_reduce( TaskPolicy<ExecSpace>     & task_policy
+            , const ParallelPolicyType  & parallel_policy
+            , const FunctorType         & functor )
+{ return task_policy.spawn( task_policy.create_reduce( parallel_policy , functor ) ); }
+
+//----------------------------------------------------------------------------
+/** \brief  Respawn a task functor with dependences */
+template< class ExecSpace , class FunctorType , class Arg0 , class Arg1 >
+inline
+void respawn( TaskPolicy<ExecSpace>   & policy
+            , FunctorType *             functor
+            , const Future<Arg0,Arg1> & before_0
+            , const Future<Arg0,Arg1> & before_1
+            )
+{
+  policy.clear_dependence( functor );
+  policy.add_dependence( functor , before_0 );
+  policy.add_dependence( functor , before_1 );
+  policy.respawn( functor );
+}
+
+//----------------------------------------------------------------------------
+
+template< class ExecSpace >
+void wait( TaskPolicy< ExecSpace > & );
+
+} /* namespace Experimental */
 } /* namespace Kokkos */
 
+//----------------------------------------------------------------------------
 //----------------------------------------------------------------------------
 
 #endif /* #define KOKKOS_TASKPOLICY_HPP */
