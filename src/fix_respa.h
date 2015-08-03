@@ -42,7 +42,6 @@ class FixRespa : public Fix {
   int unpack_exchange(int, double *);
 
  private:
-  int copy_torques;
   int nlevels;
   int store_torque;  // 1 if torques should be stored in addition to forces
   double ***f_level; // force at each rRESPA level

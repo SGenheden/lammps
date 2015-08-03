@@ -29,7 +29,6 @@ FixRespa::FixRespa(LAMMPS *lmp, int narg, char **arg) :
   // nlevels = # of rRESPA levels
 
   nlevels = force->inumeric(FLERR,arg[3]);
-  copy_torques = force->inumeric(FLERR,arg[4]);
 
   // optional arguments
   store_torque = 0;

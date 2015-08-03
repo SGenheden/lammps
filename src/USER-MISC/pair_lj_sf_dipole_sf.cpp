@@ -328,15 +328,15 @@ void PairLJSFDipoleSF::allocate()
 
 void PairLJSFDipoleSF::settings(int narg, char **arg)
 {
-  if (narg < 1 || narg > 5)
+  if (narg < 1 || narg > 2)
     error->all(FLERR,"Incorrect args in pair_style command");
 
   if (strcmp(update->unit_style,"electron") == 0)
     error->all(FLERR,"Cannot (yet) use 'electron' units with dipoles");
 
-  cut_lj_global = force->numeric(FLERR,arg[1]);
+  cut_lj_global = force->numeric(FLERR,arg[0]);
   if (narg == 1) cut_coul_global = cut_lj_global;
-  else cut_coul_global = force->numeric(FLERR,arg[2]);
+  else cut_coul_global = force->numeric(FLERR,arg[1]);
 
   // reset cutoffs that have been explicitly set
 
