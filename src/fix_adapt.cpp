@@ -30,7 +30,6 @@
 #include "math_const.h"
 #include "memory.h"
 #include "error.h"
-#include "respa.h"
 
 using namespace LAMMPS_NS;
 using namespace FixConst;
@@ -191,7 +190,6 @@ int FixAdapt::setmask()
 {
   int mask = 0;
   mask |= PRE_FORCE;
-  mask |= PRE_FORCE_RESPA;
   mask |= POST_RUN;
   mask |= PRE_FORCE_RESPA;
   return mask;

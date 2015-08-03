@@ -65,7 +65,6 @@ Respa::Respa(LAMMPS *lmp, int narg, char **arg) : Integrate(lmp, narg, arg)
   level_bond = level_angle = level_dihedral = level_improper = -1;
   level_pair = level_kspace = -1;
   level_inner = level_middle = level_outer = -1;
-  nhybrid_styles = 0;
 
   // defaults for hybrid pair styles
   nhybrid_styles = 0;
@@ -132,11 +131,6 @@ Respa::Respa(LAMMPS *lmp, int narg, char **arg) : Integrate(lmp, narg, arg)
       ++iarg;
     } else error->all(FLERR,"Illegal run_style respa command");
   }
-
-  // cannot specify both hybrid and pair/inner/middle/outer
-
-  if ((nhybrid_styles > 0) && (level_pair >=0 || level_inner >=0 || level_middle >=0 || level_outer >=0))
-    error->all(FLERR,"Cannot set both respa hybrid and pair/inner/middle/outer");
 
   // cannot specify both pair and inner/middle/outer
 
@@ -352,8 +346,7 @@ void Respa::init()
   int ifix = modify->find_fix("package_omp");
   if (ifix >= 0) external_force_clear = 1;
 
-  // set flags for what arrays to clear in force_clear()
-  // need to clear additionals arrays if they exist
+  // set flags for arrays to clear in force_clear()
 
   torqueflag = extraflag = 0;
   if (atom->torque_flag) torqueflag = 1;
@@ -734,7 +727,6 @@ void Respa::force_clear(int newtonflag)
     if (torqueflag) memset(&atom->torque[0][0],0,3*nbytes);
     if (extraflag) atom->avec->force_clear(0,nbytes);
   }
-
 }
 
 /* ----------------------------------------------------------------------
