@@ -1,6 +1,8 @@
-# LAMMPS multiple-machine Makefile
+# LAMMPS multiple-machine -*- Makefile -*-
 
 SHELL = /bin/bash
+PYTHON = python
+
 #.IGNORE:
 
 # Definitions
@@ -41,18 +43,21 @@ endif
 
 # Package variables
 
-PACKAGE = asphere body class2 colloid coreshell dipole fld gpu granular kim \
+PACKAGE = asphere body class2 colloid compress coreshell dipole gpu \
+	  granular kim \
 	  kokkos kspace manybody mc meam misc molecule mpiio opt peri poems \
-	  python qeq reax replica rigid shock snap srd voronoi xtc
+	  python qeq reax replica rigid shock snap srd voronoi
 
-PACKUSER = user-atc user-awpmd user-cg-cmm user-colvars user-cuda \
-	   user-diffraction user-drude user-eff user-fep user-intel user-lb \
+PACKUSER = user-atc user-awpmd user-cg-cmm user-colvars \
+	   user-diffraction user-dpd user-drude user-eff user-fep user-h5md \
+	   user-intel user-lb user-manifold user-mgpt \
 	   user-misc user-molfile user-omp user-phonon user-qmmm user-qtb \
-	   user-quip user-reaxc user-sph
+	   user-quip user-reaxc user-smd user-smtbq user-sph user-tally \
+	   user-vtk
 
-PACKLIB = gpu kim kokkos meam poems python reax voronoi \
-	  user-atc user-awpmd user-colvars user-cuda user-molfile \
-	  user-qmmm user-quip 
+PACKLIB = compress gpu kim kokkos meam poems python reax voronoi \
+	  user-atc user-awpmd user-colvars user-h5md user-molfile \
+	  user-qmmm user-quip user-vtk
 
 PACKALL = $(PACKAGE) $(PACKUSER)
 
@@ -143,6 +148,8 @@ help:
 	@if [ ! -e Makefile.package.settings ]; \
 	  then cp Makefile.package.settings.empty Makefile.package.settings; fi
 	@cp Makefile.package Makefile.package.settings $(objdir)
+	@cd $(objdir); rm -f .depend; \
+	$(MAKE) $(MFLAGS) "SRC = $(SRC)" "INC = $(INC)" depend || :
 ifeq ($(mode),exe)
 	@cd $(objdir); \
 	$(MAKE) $(MFLAGS) "OBJ = $(OBJ)" "INC = $(INC)" "SHFLAGS =" \
@@ -193,14 +200,15 @@ mpi-stubs:
 # install LAMMPS shared lib and Python wrapper for Python usage
 
 install-python:
-	@python ../python/install.py
+	@$(PYTHON) ../python/install.py
 
 # Create a tarball of src dir and packages
 
 tar:
 	@cd STUBS; $(MAKE) clean
 	@cd ..; tar cvzf src/$(ROOT)_src.tar.gz \
-	  src/Make* src/Package.sh src/MAKE src/*.cpp src/*.h src/STUBS \
+	  src/Make* src/Package.sh src/Depend.sh src/Install.sh \
+	  src/MAKE src/DEPEND src/*.cpp src/*.h src/STUBS \
 	  $(patsubst %,src/%,$(PACKAGEUC)) $(patsubst %,src/%,$(PACKUSERUC)) \
           --exclude=*/.svn
 	@cd STUBS; $(MAKE)

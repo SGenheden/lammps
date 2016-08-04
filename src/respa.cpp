@@ -15,8 +15,8 @@
    Contributing authors: Mark Stevens (SNL), Paul Crozier (SNL)
 ------------------------------------------------------------------------- */
 
-#include "stdlib.h"
-#include "string.h"
+#include <stdlib.h>
+#include <string.h>
 #include "respa.h"
 #include "neighbor.h"
 #include "atom.h"
@@ -67,6 +67,7 @@ Respa::Respa(LAMMPS *lmp, int narg, char **arg) : Integrate(lmp, narg, arg)
   level_inner = level_middle = level_outer = -1;
 
   // defaults for hybrid pair styles
+
   nhybrid_styles = 0;
   tally_global = 1;
   pair_compute = 1;
@@ -150,9 +151,12 @@ Respa::Respa(LAMMPS *lmp, int narg, char **arg) : Integrate(lmp, narg, arg)
     error->all(FLERR,"Cannot set respa middle without inner/outer");
 
   // cannot combine hybrid with any of pair/inner/middle/outer
+
   if ((nhybrid_styles > 0) && (level_pair >= 0 || level_inner >= 0
                                || level_middle >= 0 || level_outer >= 0))
-    error->all(FLERR,"Cannot set respa hybrid and any of pair/inner/middle/outer");
+    error->all(FLERR,"Cannot set respa hybrid and "
+               "any of pair/inner/middle/outer");
+
   // set defaults if user did not specify level
   // bond to innermost level
   // angle same as bond, dihedral same as angle, improper same as dihedral
@@ -269,7 +273,9 @@ Respa::Respa(LAMMPS *lmp, int narg, char **arg) : Integrate(lmp, narg, arg)
     cutoff[3] = cutoff[1];
   }
 
-  // ensure that pair->compute() is run properly when the "hybrid" keyword is not used. 
+  // ensure that pair->compute() is run properly
+  // when the hybrid keyword is not used
+
   if (nhybrid_styles < 1) {
     pair_compute = 1;
     tally_global = 1;
@@ -394,7 +400,18 @@ void Respa::setup()
     fprintf(screen,"Setting up r-RESPA run ...\n");
     fprintf(screen,"  Unit style    : %s\n", update->unit_style);
     fprintf(screen,"  Current step  : " BIGINT_FORMAT "\n", update->ntimestep);
-    fprintf(screen,"  OuterTime step: %g\n", update->dt);
+    fprintf(screen,"  Time steps    :");
+    for (int ilevel=0; ilevel < nlevels; ++ilevel)
+      fprintf(screen," %d:%g",ilevel+1, step[ilevel]);
+    fprintf(screen,"\n  r-RESPA fixes :");
+    for (int l=0; l < modify->n_post_force_respa; ++l) {
+      Fix *f = modify->fix[modify->list_post_force_respa[l]];
+      if (f->respa_level >= 0)
+        fprintf(screen," %d:%s[%s]",
+                MIN(f->respa_level+1,nlevels),f->style,f->id);
+    }
+    fprintf(screen,"\n");
+    timer->print_timeout(screen);
   }
 
   update->setupflag = 1;
@@ -422,6 +439,7 @@ void Respa::setup()
 
   // compute all forces
 
+  force->setup();
   ev_set(update->ntimestep);
 
   for (int ilevel = 0; ilevel < nlevels; ilevel++) {
@@ -452,6 +470,8 @@ void Respa::setup()
       force->kspace->setup();
       if (kspace_compute_flag) force->kspace->compute(eflag,vflag);
     }
+
+    modify->pre_reverse(eflag,vflag);
     if (newton[ilevel]) comm->reverse_comm();
     copy_f_flevel(ilevel);
   }
@@ -526,6 +546,8 @@ void Respa::setup_minimal(int flag)
       force->kspace->setup();
       if (kspace_compute_flag) force->kspace->compute(eflag,vflag);
     }
+
+    modify->pre_reverse(eflag,vflag);
     if (newton[ilevel]) comm->reverse_comm();
     copy_f_flevel(ilevel);
   }
@@ -544,6 +566,10 @@ void Respa::run(int n)
   bigint ntimestep;
 
   for (int i = 0; i < n; i++) {
+    if (timer->check_timeout(i)) {
+      update->nsteps = i;
+      break;
+    }
 
     ntimestep = ++update->ntimestep;
     ev_set(ntimestep);
@@ -554,12 +580,16 @@ void Respa::run(int n)
 
     sum_flevel_f();
 
-    if (modify->n_end_of_step) modify->end_of_step();
+    if (modify->n_end_of_step) {
+      timer->stamp();
+      modify->end_of_step();
+      timer->stamp(Timer::MODIFY);
+    }
 
     if (ntimestep == output->next) {
       timer->stamp();
       output->write(update->ntimestep);
-      timer->stamp(TIME_OUTPUT);
+      timer->stamp(Timer::OUTPUT);
     }
   }
 }
@@ -593,9 +623,11 @@ void Respa::recurse(int ilevel)
 
   for (int iloop = 0; iloop < loop[ilevel]; iloop++) {
 
+    timer->stamp();
     modify->initial_integrate_respa(vflag,ilevel,iloop);
     if (modify->n_post_integrate_respa)
       modify->post_integrate_respa(ilevel,iloop);
+    timer->stamp(Timer::MODIFY);
 
     // at outermost level, check on rebuilding neighbor list
     // at innermost level, communicate
@@ -604,7 +636,11 @@ void Respa::recurse(int ilevel)
     if (ilevel == nlevels-1) {
       int nflag = neighbor->decide();
       if (nflag) {
-        if (modify->n_pre_exchange) modify->pre_exchange();
+        if (modify->n_pre_exchange) {
+          timer->stamp();
+          modify->pre_exchange();
+          timer->stamp(Timer::MODIFY);
+        }
         if (triclinic) domain->x2lamda(atom->nlocal);
         domain->pbc();
         if (domain->box_change) {
@@ -618,20 +654,23 @@ void Respa::recurse(int ilevel)
             update->ntimestep >= atom->nextsort) atom->sort();
         comm->borders();
         if (triclinic) domain->lamda2x(atom->nlocal+atom->nghost);
-        timer->stamp(TIME_COMM);
-        if (modify->n_pre_neighbor) modify->pre_neighbor();
+        timer->stamp(Timer::COMM);
+        if (modify->n_pre_neighbor) {
+          modify->pre_neighbor();
+          timer->stamp(Timer::MODIFY);
+        }
         neighbor->build();
-        timer->stamp(TIME_NEIGHBOR);
+        timer->stamp(Timer::NEIGH);
       } else if (ilevel == 0) {
         timer->stamp();
         comm->forward_comm();
-        timer->stamp(TIME_COMM);
+        timer->stamp(Timer::COMM);
       }
 
     } else if (ilevel == 0) {
       timer->stamp();
       comm->forward_comm();
-      timer->stamp(TIME_COMM);
+      timer->stamp(Timer::COMM);
     }
 
     // rRESPA recursion thru all levels
@@ -648,60 +687,69 @@ void Respa::recurse(int ilevel)
     // when potentials are invoked at same level
 
     force_clear(newton[ilevel]);
-    if (modify->n_pre_force_respa)
+    if (modify->n_pre_force_respa) {
+      timer->stamp();
       modify->pre_force_respa(vflag,ilevel,iloop);
+      timer->stamp(Timer::MODIFY);
+    }
 
     timer->stamp();
     if (nhybrid_styles > 0) {
       set_compute_flags(ilevel);
       force->pair->compute(eflag,vflag);
-      timer->stamp(TIME_PAIR);
+      timer->stamp(Timer::PAIR);
     }
     if (level_pair == ilevel && pair_compute_flag) {
       force->pair->compute(eflag,vflag);
-      timer->stamp(TIME_PAIR);
+      timer->stamp(Timer::PAIR);
     }
     if (level_inner == ilevel && pair_compute_flag) {
       force->pair->compute_inner();
-      timer->stamp(TIME_PAIR);
+      timer->stamp(Timer::PAIR);
     }
     if (level_middle == ilevel && pair_compute_flag) {
       force->pair->compute_middle();
-      timer->stamp(TIME_PAIR);
+      timer->stamp(Timer::PAIR);
     }
     if (level_outer == ilevel && pair_compute_flag) {
       force->pair->compute_outer(eflag,vflag);
-      timer->stamp(TIME_PAIR);
+      timer->stamp(Timer::PAIR);
     }
     if (level_bond == ilevel && force->bond) {
       force->bond->compute(eflag,vflag);
-      timer->stamp(TIME_BOND);
+      timer->stamp(Timer::BOND);
     }
     if (level_angle == ilevel && force->angle) {
       force->angle->compute(eflag,vflag);
-      timer->stamp(TIME_BOND);
+      timer->stamp(Timer::BOND);
     }
     if (level_dihedral == ilevel && force->dihedral) {
       force->dihedral->compute(eflag,vflag);
-      timer->stamp(TIME_BOND);
+      timer->stamp(Timer::BOND);
     }
     if (level_improper == ilevel && force->improper) {
       force->improper->compute(eflag,vflag);
-      timer->stamp(TIME_BOND);
+      timer->stamp(Timer::BOND);
     }
     if (level_kspace == ilevel && kspace_compute_flag) {
       force->kspace->compute(eflag,vflag);
-      timer->stamp(TIME_KSPACE);
+      timer->stamp(Timer::KSPACE);
+    }
+
+    if (modify->n_pre_reverse) {
+      modify->pre_reverse(eflag,vflag);
+      timer->stamp(Timer::MODIFY);
     }
 
     if (newton[ilevel]) {
       comm->reverse_comm();
-      timer->stamp(TIME_COMM);
+      timer->stamp(Timer::COMM);
     }
-
+    timer->stamp();
     if (modify->n_post_force_respa)
       modify->post_force_respa(vflag,ilevel,iloop);
     modify->final_integrate_respa(ilevel,iloop);
+    timer->stamp(Timer::MODIFY);
   }
 
   copy_f_flevel(ilevel);

@@ -48,8 +48,6 @@
 
 namespace Kokkos { namespace Impl {
 
-class AllocationTracker;
-
 //The following tag is used to prevent an implicit call of the constructor when trying
 //to assign a literal 0 int ( = 0 );
 struct AtomicViewConstTag {};
@@ -427,6 +425,10 @@ struct Kokkos_Atomic_is_only_allowed_with_32bit_and_64bit_scalars<8> {
   typedef int64_t type;
 };
 
+#if ! KOKKOS_USING_EXP_VIEW
+
+class AllocationTracker;
+
 // Must be non-const, atomic access trait, and 32 or 64 bit type for true atomics.
 template<class ViewTraits>
 class ViewDataHandle<
@@ -456,6 +458,8 @@ public:
     return handle_type(arg_data_ptr);
   }
 };
+
+#endif /* #if ! KOKKOS_USING_EXP_VIEW */
 
 }} // namespace Kokkos::Impl
 

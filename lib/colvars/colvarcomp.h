@@ -1,4 +1,4 @@
-/// -*- c++ -*-
+// -*- c++ -*-
 
 #ifndef COLVARCOMP_H
 #define COLVARCOMP_H
@@ -61,7 +61,7 @@
 /// call to e.g. apply_force().
 
 class colvar::cvc
-  : public colvarparse
+  : public colvarparse, public cvm::deps
 {
 public:
 
@@ -84,10 +84,6 @@ public:
   /// \brief Exponent in the polynomial combination (default: 1)
   int       sup_np;
 
-  /// \brief This defaults to true; setting it to false disables
-  /// update of this cvc to save compute time (useful with scriptedFunction)
-  bool b_enabled;
-
   /// \brief Is this a periodic component?
   bool b_periodic;
 
@@ -107,10 +103,13 @@ public:
 
   /// \brief Within the constructor, make a group parse its own
   /// options from the provided configuration string
-  void parse_group(std::string const &conf,
+  /// Returns reference to new group
+  cvm::atom_group *parse_group(std::string const &conf,
                    char const *group_key,
-                   cvm::atom_group &group,
                    bool optional = false);
+
+  /// \brief After construction, set data related to dependency handling
+  int setup();
 
   /// \brief Default constructor (used when \link cvc \endlink
   /// objects are declared within other ones)
@@ -119,18 +118,16 @@ public:
   /// Destructor
   virtual ~cvc();
 
+  /// \brief Implementation of the feature list for colvar
+  static std::vector<feature *> cvc_features;
 
-  /// \brief If this flag is false (default), inverse gradients
-  /// (derivatives of atom coordinates with respect to x) are
-  /// unavailable; it should be set to true by the constructor of each
-  /// derived object capable of calculating them
-  bool b_inverse_gradients;
+  /// \brief Implementation of the feature list accessor for colvar
+  virtual std::vector<feature *> &features() {
+    return cvc_features;
+  }
 
-  /// \brief If this flag is false (default), the Jacobian derivative
-  /// (divergence of the inverse gradients) is unavailable; it should
-  /// be set to true by the constructor of each derived object capable
-  /// of calculating it
-  bool b_Jacobian_derivative;
+  /// \brief Obtain data needed for the calculation for the backend
+  void read_data();
 
   /// \brief Calculate the variable
   virtual void calc_value() = 0;
@@ -139,11 +136,8 @@ public:
   /// order to apply forces
   virtual void calc_gradients() = 0;
 
-  /// \brief If true, calc_gradients() will call debug_gradients() for every group needed
-  bool b_debug_gradients;
-
   /// \brief Calculate finite-difference gradients alongside the analytical ones, for each Cartesian component
-  virtual void debug_gradients(cvm::atom_group &group);
+  virtual void debug_gradients(cvm::atom_group *group);
 
   /// \brief Calculate the total force from the system using the
   /// inverse atomic gradients
@@ -227,6 +221,9 @@ public:
   /// e.g. atomic gradients
   std::vector<cvm::atom_group *> atom_groups;
 
+  /// \brief Whether or not this CVC will be computed in parallel whenever possible
+  bool b_try_scalable;
+
 protected:
 
   /// \brief Cached value
@@ -296,20 +293,15 @@ inline void colvar::cvc::wrap(colvarvalue &x) const
 
 /// \brief Colvar component: distance between the centers of mass of
 /// two groups (colvarvalue::type_scalar type, range [0:*))
-///
-/// This class also serves as the template for many collective
-/// variables with two atom groups: in this case, the
-/// distance::distance() constructor should be called on the same
-/// configuration string, to make the same member data and functions
-/// available to the derived object
+
 class colvar::distance
   : public colvar::cvc
 {
 protected:
   /// First atom group
-  cvm::atom_group  group1;
+  cvm::atom_group  *group1;
   /// Second atom group
-  cvm::atom_group  group2;
+  cvm::atom_group  *group2;
   /// Vector distance, cached to be recycled
   cvm::rvector     dist_v;
   /// Use absolute positions, ignoring PBCs when present
@@ -318,7 +310,7 @@ protected:
   /// coupling to other colvars (see e.g. Ciccotti et al., 2005)
   bool b_1site_force;
 public:
-  distance(std::string const &conf, bool twogroups = true);
+  distance(std::string const &conf);
   distance();
   virtual inline ~distance() {}
   virtual void calc_value();
@@ -389,11 +381,11 @@ class colvar::distance_z
 {
 protected:
   /// Main atom group
-  cvm::atom_group  main;
+  cvm::atom_group  *main;
   /// Reference atom group
-  cvm::atom_group  ref1;
+  cvm::atom_group  *ref1;
   /// Optional, second ref atom group
-  cvm::atom_group  ref2;
+  cvm::atom_group  *ref2;
   /// Use absolute positions, ignoring PBCs when present
   bool b_no_PBC;
   /// Compute system force on one site only to avoid unwanted
@@ -486,9 +478,9 @@ class colvar::distance_pairs
 {
 protected:
   /// First atom group
-  cvm::atom_group  group1;
+  cvm::atom_group  *group1;
   /// Second atom group
-  cvm::atom_group  group2;
+  cvm::atom_group  *group2;
   /// Use absolute positions, ignoring PBCs when present
   bool b_no_PBC;
 public:
@@ -515,7 +507,7 @@ class colvar::gyration
 {
 protected:
   /// Atoms involved
-  cvm::atom_group atoms;
+  cvm::atom_group  *atoms;
 public:
   /// Constructor
   gyration(std::string const &conf);
@@ -590,7 +582,7 @@ class colvar::eigenvector
 protected:
 
   /// Atom group
-  cvm::atom_group             atoms;
+  cvm::atom_group  *           atoms;
 
   /// Reference coordinates
   std::vector<cvm::atom_pos>  ref_pos;
@@ -632,11 +624,11 @@ class colvar::angle
 protected:
 
   /// Atom group
-  cvm::atom_group group1;
+  cvm::atom_group  *group1;
   /// Atom group
-  cvm::atom_group group2;
+  cvm::atom_group  *group2;
   /// Atom group
-  cvm::atom_group group3;
+  cvm::atom_group  *group3;
 
   /// Inter site vectors
   cvm::rvector r21, r23;
@@ -670,6 +662,49 @@ public:
                                   colvarvalue const &x2) const;
 };
 
+/// \brief Colvar component: angle between the dipole of a molecule and an axis
+/// formed by two groups of atoms(colvarvalue::type_scalar type, range [0:PI])
+class colvar::dipole_angle
+  : public colvar::cvc
+{
+protected:
+
+  /// Dipole atom group
+  cvm::atom_group  *group1;
+  /// Atom group
+  cvm::atom_group  *group2;
+  /// Atom group
+  cvm::atom_group  *group3;
+
+  /// Inter site vectors
+  cvm::rvector r21, r23;
+  /// Inter site vector norms
+  cvm::real r21l, r23l;
+  /// Derivatives wrt group centers of mass
+  cvm::rvector dxdr1, dxdr3;
+
+  /// Compute system force on first site only to avoid unwanted
+  /// coupling to other colvars (see e.g. Ciccotti et al., 2005)
+  /// (or to allow dummy atoms)
+  bool b_1site_force;
+public:
+
+  /// Initialize by parsing the configuration
+  dipole_angle (std::string const &conf);
+  /// \brief Initialize the three groups after three atoms
+  dipole_angle (cvm::atom const &a1, cvm::atom const &a2, cvm::atom const &a3);
+  dipole_angle();
+  virtual inline ~dipole_angle() {}
+  virtual void calc_value();
+  virtual void calc_gradients();
+  virtual void apply_force (colvarvalue const &force);
+  virtual cvm::real dist2 (colvarvalue const &x1,
+                           colvarvalue const &x2) const;
+  virtual colvarvalue dist2_lgrad (colvarvalue const &x1,
+                                   colvarvalue const &x2) const;
+  virtual colvarvalue dist2_rgrad (colvarvalue const &x1,
+                                   colvarvalue const &x2) const;
+};
 
 /// \brief Colvar component: dihedral between the centers of mass of
 /// four groups (colvarvalue::type_scalar type, range [-PI:PI])
@@ -679,13 +714,13 @@ class colvar::dihedral
 protected:
 
   /// Atom group
-  cvm::atom_group group1;
+  cvm::atom_group  *group1;
   /// Atom group
-  cvm::atom_group group2;
+  cvm::atom_group  *group2;
   /// Atom group
-  cvm::atom_group group3;
+  cvm::atom_group  *group3;
   /// Atom group
-  cvm::atom_group group4;
+  cvm::atom_group  *group4;
   /// Inter site vectors
   cvm::rvector r12, r23, r34;
 
@@ -724,9 +759,13 @@ public:
 /// \brief Colvar component: coordination number between two groups
 /// (colvarvalue::type_scalar type, range [0:N1*N2])
 class colvar::coordnum
-  : public colvar::distance
+  : public colvar::cvc
 {
 protected:
+  /// First atom group
+  cvm::atom_group  *group1;
+  /// Second atom group
+  cvm::atom_group  *group2;
   /// \brief "Cutoff" for isotropic calculation (default)
   cvm::real     r0;
   /// \brief "Cutoff vector" for anisotropic calculation
@@ -779,9 +818,11 @@ public:
 /// \brief Colvar component: self-coordination number within a group
 /// (colvarvalue::type_scalar type, range [0:N*(N-1)/2])
 class colvar::selfcoordnum
-  : public colvar::distance
+  : public colvar::cvc
 {
 protected:
+  /// First atom group
+  cvm::atom_group  *group1;
   /// \brief "Cutoff" for isotropic calculation (default)
   cvm::real     r0;
   /// Integer exponent of the function numerator
@@ -966,7 +1007,7 @@ class colvar::orientation
 protected:
 
   /// Atom group
-  cvm::atom_group            atoms;
+  cvm::atom_group  *          atoms;
   /// Center of geometry of the group
   cvm::atom_pos              atoms_cog;
 
@@ -1112,7 +1153,7 @@ class colvar::rmsd
 protected:
 
   /// Atom group
-  cvm::atom_group             atoms;
+  cvm::atom_group  *atoms;
 
   /// Reference coordinates (for RMSD calculation only)
   std::vector<cvm::atom_pos>  ref_pos;
@@ -1143,7 +1184,7 @@ class colvar::cartesian
 {
 protected:
   /// Atom group
-  cvm::atom_group atoms;
+  cvm::atom_group  *atoms;
   /// Which Cartesian coordinates to include
   std::vector<size_t> axes;
 public:
@@ -1190,6 +1231,7 @@ simple_scalar_dist_functions(distance)
 simple_scalar_dist_functions(distance_xy)
 simple_scalar_dist_functions(distance_inv)
 simple_scalar_dist_functions(angle)
+simple_scalar_dist_functions(dipole_angle)
 simple_scalar_dist_functions(coordnum)
 simple_scalar_dist_functions(selfcoordnum)
 simple_scalar_dist_functions(h_bond)

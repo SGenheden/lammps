@@ -11,9 +11,9 @@
    See the README file in the top-level LAMMPS directory.
    ------------------------------------------------------------------------- */
 
-#include "math.h"
-#include "stdio.h"
-#include "string.h"
+#include <math.h>
+#include <stdio.h>
+#include <string.h>
 #include "fix_langevin_kokkos.h"
 #include "atom_masks.h"
 #include "atom_kokkos.h"
@@ -667,7 +667,7 @@ void FixLangevinKokkos<DeviceType>::compute_target()
         error->one(FLERR,"Fix langevin variable returned negative temperature");
       tsqrt = sqrt(t_target);
     } else {
-      if (nlocal > maxatom2) {
+      if (atom->nmax > maxatom2) {
         maxatom2 = atom->nmax;
         memory->destroy_kokkos(k_tforce,tforce);
         memory->create_kokkos(k_tforce,tforce,maxatom2,"langevin:tforce");
@@ -804,7 +804,10 @@ void FixLangevinKokkos<DeviceType>::cleanup_copy()
   vatom = NULL;
 }
 
+namespace LAMMPS_NS {
 template class FixLangevinKokkos<LMPDeviceType>;
 #ifdef KOKKOS_HAVE_CUDA
 template class FixLangevinKokkos<LMPHostType>;
 #endif
+}
+

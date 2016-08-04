@@ -87,7 +87,7 @@ class PairBuckKokkos : public PairBuck {
   typename ArrayTypes<DeviceType>::tdual_ffloat_2d k_cutsq;
   typename ArrayTypes<DeviceType>::t_ffloat_2d d_cutsq;
 
-  
+
   int neighflag;
   int nlocal,nall,eflag,vflag;
 
@@ -120,7 +120,7 @@ class PairBuckKokkos : public PairBuck {
 
 E: Cannot use Kokkos pair style with rRESPA inner/middle
 
-rRESPA inner/middle options are not yet supported by Kokkos.
+Self-explanatory.
 
 E: Cannot use chosen neighbor list style with buck/kk
 

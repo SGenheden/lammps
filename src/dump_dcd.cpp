@@ -16,11 +16,11 @@
                         Axel Kohlmeyer (Temple U), support for groups
 ------------------------------------------------------------------------- */
 
-#include "math.h"
-#include "inttypes.h"
-#include "stdio.h"
-#include "time.h"
-#include "string.h"
+#include <math.h>
+#include <inttypes.h>
+#include <stdio.h>
+#include <time.h>
+#include <string.h>
 #include "dump_dcd.h"
 #include "domain.h"
 #include "atom.h"
@@ -126,7 +126,7 @@ void DumpDCD::write_header(bigint n)
 {
   if (n != natoms) error->all(FLERR,"Dump dcd of non-matching # of atoms");
   if (update->ntimestep > MAXSMALLINT)
-    error->all(FLERR,"Too big a timestep for dump dcd");
+    error->one(FLERR,"Too big a timestep for dump dcd");
 
   // first time, write header for entire file
 

@@ -15,9 +15,9 @@
    Contributing authors: Mark Stevens (SNL), Aidan Thompson (SNL)
 ------------------------------------------------------------------------- */
 
-#include "string.h"
-#include "stdlib.h"
-#include "math.h"
+#include <string.h>
+#include <stdlib.h>
+#include <math.h>
 #include "fix_nh.h"
 #include "math_extra.h"
 #include "atom.h"
@@ -45,7 +45,6 @@ using namespace FixConst;
 enum{NOBIAS,BIAS};
 enum{NONE,XYZ,XY,YZ,XZ};
 enum{ISO,ANISO,TRICLINIC};
-enum{NOUPDATE,DIPOLE};
 
 /* ----------------------------------------------------------------------
    NVT,NPH,NPT integrators for improved Nose-Hoover equations of motion
@@ -63,7 +62,6 @@ FixNH::FixNH(LAMMPS *lmp, int narg, char **arg) : Fix(lmp, narg, arg)
   global_freq = 1;
   extscalar = 1;
   extvector = 0;
-  extra = NOUPDATE;
 
   // default values
 
@@ -80,6 +78,13 @@ FixNH::FixNH(LAMMPS *lmp, int narg, char **arg) : Fix(lmp, narg, arg)
   omega_mass_flag = 0;
   etap_mass_flag = 0;
   flipflag = 1;
+  dipole_flag = 0;
+  dlm_flag = 0;
+
+  tcomputeflag = 0;
+  pcomputeflag = 0;
+  id_temp = NULL;
+  id_press = NULL;
 
   // turn on tilt factor scaling, whenever applicable
 
@@ -133,7 +138,7 @@ FixNH::FixNH(LAMMPS *lmp, int narg, char **arg) : Fix(lmp, narg, arg)
       pcouple = XYZ;
       p_start[0] = p_start[1] = p_start[2] = force->numeric(FLERR,arg[iarg+1]);
       p_stop[0] = p_stop[1] = p_stop[2] = force->numeric(FLERR,arg[iarg+2]);
-      p_period[0] = p_period[1] = p_period[2] = 
+      p_period[0] = p_period[1] = p_period[2] =
         force->numeric(FLERR,arg[iarg+3]);
       p_flag[0] = p_flag[1] = p_flag[2] = 1;
       if (dimension == 2) {
@@ -146,7 +151,7 @@ FixNH::FixNH(LAMMPS *lmp, int narg, char **arg) : Fix(lmp, narg, arg)
       pcouple = NONE;
       p_start[0] = p_start[1] = p_start[2] = force->numeric(FLERR,arg[iarg+1]);
       p_stop[0] = p_stop[1] = p_stop[2] = force->numeric(FLERR,arg[iarg+2]);
-      p_period[0] = p_period[1] = p_period[2] = 
+      p_period[0] = p_period[1] = p_period[2] =
         force->numeric(FLERR,arg[iarg+3]);
       p_flag[0] = p_flag[1] = p_flag[2] = 1;
       if (dimension == 2) {
@@ -160,12 +165,12 @@ FixNH::FixNH(LAMMPS *lmp, int narg, char **arg) : Fix(lmp, narg, arg)
       scalexy = scalexz = scaleyz = 0;
       p_start[0] = p_start[1] = p_start[2] = force->numeric(FLERR,arg[iarg+1]);
       p_stop[0] = p_stop[1] = p_stop[2] = force->numeric(FLERR,arg[iarg+2]);
-      p_period[0] = p_period[1] = p_period[2] = 
+      p_period[0] = p_period[1] = p_period[2] =
         force->numeric(FLERR,arg[iarg+3]);
       p_flag[0] = p_flag[1] = p_flag[2] = 1;
       p_start[3] = p_start[4] = p_start[5] = 0.0;
       p_stop[3] = p_stop[4] = p_stop[5] = 0.0;
-      p_period[3] = p_period[4] = p_period[5] = 
+      p_period[3] = p_period[4] = p_period[5] =
         force->numeric(FLERR,arg[iarg+3]);
       p_flag[3] = p_flag[4] = p_flag[5] = 1;
       if (dimension == 2) {
@@ -323,17 +328,20 @@ FixNH::FixNH(LAMMPS *lmp, int narg, char **arg) : Fix(lmp, narg, arg)
       else if (strcmp(arg[iarg+1],"no") == 0) flipflag = 0;
       else error->all(FLERR,"Illegal fix nvt/npt/nph command");
       iarg += 2;
+    } else if (strcmp(arg[iarg],"update") == 0) {
+      if (iarg+2 > narg) error->all(FLERR,"Illegal fix nvt/npt/nph command");
+      if (strcmp(arg[iarg+1],"dipole") == 0) dipole_flag = 1;
+      else if (strcmp(arg[iarg+1],"dipole/dlm") == 0) {
+        dipole_flag = 1;
+        dlm_flag = 1;
+      } else error->all(FLERR,"Illegal fix nvt/npt/nph command");
+      iarg += 2;
     } else if (strcmp(arg[iarg],"fixedpoint") == 0) {
       if (iarg+4 > narg) error->all(FLERR,"Illegal fix nvt/npt/nph command");
       fixedpoint[0] = force->numeric(FLERR,arg[iarg+1]);
       fixedpoint[1] = force->numeric(FLERR,arg[iarg+2]);
       fixedpoint[2] = force->numeric(FLERR,arg[iarg+3]);
       iarg += 4;
-    } else if (strcmp(arg[iarg],"update") == 0) {
-         if (iarg+2 > narg) error->all(FLERR,"Illegal fix nvt/nph/npt sphere command");
-         if (strcmp(arg[iarg+1],"dipole") == 0) extra = DIPOLE;
-         else error->all(FLERR,"Illegal fix nvt/nph/npt sphere command");
-         iarg += 2;
     } else error->all(FLERR,"Illegal fix nvt/npt/nph command");
   }
 
@@ -424,6 +432,13 @@ FixNH::FixNH(LAMMPS *lmp, int narg, char **arg) : Fix(lmp, narg, arg)
        p_period[0] != p_period[2]))
     error->all(FLERR,"Invalid fix nvt/npt/nph pressure settings");
 
+  if (dipole_flag) {
+    if (!atom->sphere_flag)
+      error->all(FLERR,"Using update dipole flag requires atom style sphere");
+    if (!atom->mu_flag)
+      error->all(FLERR,"Using update dipole flag requires atom attribute mu");
+  }
+  
   if ((tstat_flag && t_period <= 0.0) ||
       (p_flag[0] && p_period[0] <= 0.0) ||
       (p_flag[1] && p_period[1] <= 0.0) ||
@@ -435,7 +450,10 @@ FixNH::FixNH(LAMMPS *lmp, int narg, char **arg) : Fix(lmp, narg, arg)
 
   // set pstat_flag and box change and restart_pbc variables
 
+  pre_exchange_flag = 0;
   pstat_flag = 0;
+  pstyle = ISO;
+
   for (int i = 0; i < 6; i++)
     if (p_flag[i]) pstat_flag = 1;
 
@@ -444,22 +462,21 @@ FixNH::FixNH(LAMMPS *lmp, int narg, char **arg) : Fix(lmp, narg, arg)
     if (p_flag[3] || p_flag[4] || p_flag[5]) box_change_shape = 1;
     no_change_box = 1;
     if (allremap == 0) restart_pbc = 1;
+
+    // pstyle = TRICLINIC if any off-diagonal term is controlled -> 6 dof
+    // else pstyle = ISO if XYZ coupling or XY coupling in 2d -> 1 dof
+    // else pstyle = ANISO -> 3 dof
+
+    if (p_flag[3] || p_flag[4] || p_flag[5]) pstyle = TRICLINIC;
+    else if (pcouple == XYZ || (dimension == 2 && pcouple == XY)) pstyle = ISO;
+    else pstyle = ANISO;
+
+    // pre_exchange only required if flips can occur due to shape changes
+
+    if (flipflag && (p_flag[3] || p_flag[4] || p_flag[5])) pre_exchange_flag = 1;
+    if (flipflag && (domain->yz != 0.0 || domain->xz != 0.0 || domain->xy != 0.0))
+      pre_exchange_flag = 1;
   }
-
-  // pstyle = TRICLINIC if any off-diagonal term is controlled -> 6 dof
-  // else pstyle = ISO if XYZ coupling or XY coupling in 2d -> 1 dof
-  // else pstyle = ANISO -> 3 dof
-
-  if (p_flag[3] || p_flag[4] || p_flag[5]) pstyle = TRICLINIC;
-  else if (pcouple == XYZ || (dimension == 2 && pcouple == XY)) pstyle = ISO;
-  else pstyle = ANISO;
-
-  // pre_exchange only required if flips can occur due to shape changes
-
-  pre_exchange_flag = 0;
-  if (flipflag && (p_flag[3] || p_flag[4] || p_flag[5])) pre_exchange_flag = 1;
-  if (flipflag && (domain->yz != 0.0 || domain->xz != 0.0 || domain->xy != 0.0))
-    pre_exchange_flag = 1;
 
   // convert input periods to frequencies
 
@@ -541,6 +558,8 @@ FixNH::FixNH(LAMMPS *lmp, int narg, char **arg) : Fix(lmp, narg, arg)
 
 FixNH::~FixNH()
 {
+  if (copymode) return;
+
   delete [] id_dilate;
   delete [] rfix;
 
@@ -548,7 +567,7 @@ FixNH::~FixNH()
 
   // delete temperature and pressure if fix created them
 
-  if (tflag) modify->delete_compute(id_temp);
+  if (tcomputeflag) modify->delete_compute(id_temp);
   delete [] id_temp;
 
   if (tstat_flag) {
@@ -559,7 +578,7 @@ FixNH::~FixNH()
   }
 
   if (pstat_flag) {
-    if (pflag) modify->delete_compute(id_press);
+    if (pcomputeflag) modify->delete_compute(id_press);
     delete [] id_press;
     if (mpchain) {
       delete [] etap;
@@ -703,11 +722,16 @@ void FixNH::init()
 
 void FixNH::setup(int vflag)
 {
-  // t_target is needed by NPH and NPT in compute_scalar()
+  // tdof needed by compute_temp_target()
+
+  t_current = temperature->compute_scalar();
+  tdof = temperature->dof;
+  
+  // t_target is needed by NVT and NPT in compute_scalar()
   // If no thermostat or using fix nphug,
   // t_target must be defined by other means.
 
-  if (tstat_flag && strcmp(style,"nphug") != 0) {
+  if (tstat_flag && strstr(style,"nphug") == NULL) {
     compute_temp_target();
   } else if (pstat_flag) {
 
@@ -728,9 +752,6 @@ void FixNH::setup(int vflag)
   }
 
   if (pstat_flag) compute_press_target();
-
-  t_current = temperature->compute_scalar();
-  tdof = temperature->dof;
 
   if (pstat_flag) {
     if (pstyle == ISO) pressure->compute_scalar();
@@ -847,11 +868,11 @@ void FixNH::final_integrate()
 
   // re-compute temp before nh_v_press()
   // only needed for temperature computes with BIAS on reneighboring steps:
-  //   b/c some biases store per-atom values (e.g. temp/profile) 
+  //   b/c some biases store per-atom values (e.g. temp/profile)
   //   per-atom values are invalid if reneigh/comm occurred
   //     since temp->compute() in initial_integrate()
 
-  if (which == BIAS && neighbor->ago == 0) 
+  if (which == BIAS && neighbor->ago == 0)
     t_current = temperature->compute_scalar();
 
   if (pstat_flag) nh_v_press();
@@ -1335,9 +1356,9 @@ int FixNH::modify_param(int narg, char **arg)
 {
   if (strcmp(arg[0],"temp") == 0) {
     if (narg < 2) error->all(FLERR,"Illegal fix_modify command");
-    if (tflag) {
+    if (tcomputeflag) {
       modify->delete_compute(id_temp);
-      tflag = 0;
+      tcomputeflag = 0;
     }
     delete [] id_temp;
     int n = strlen(arg[1]) + 1;
@@ -1369,9 +1390,9 @@ int FixNH::modify_param(int narg, char **arg)
   } else if (strcmp(arg[0],"press") == 0) {
     if (narg < 2) error->all(FLERR,"Illegal fix_modify command");
     if (!pstat_flag) error->all(FLERR,"Illegal fix_modify command");
-    if (pflag) {
+    if (pcomputeflag) {
       modify->delete_compute(id_press);
-      pflag = 0;
+      pcomputeflag = 0;
     }
     delete [] id_press;
     int n = strlen(arg[1]) + 1;
@@ -2146,7 +2167,7 @@ void FixNH::compute_press_target()
       p_target[i] = p_start[i] + delta * (p_stop[i]-p_start[i]);
       p_hydro += p_target[i];
     }
-  p_hydro /= pdim;
+  if (pdim > 0) p_hydro /= pdim;
 
   if (pstyle == TRICLINIC)
     for (int i = 3; i < 6; i++)
@@ -2198,7 +2219,7 @@ void FixNH::nh_omega_dot()
     for (int i = 0; i < 3; i++)
       if (p_flag[i])
         mtk_term2 += omega_dot[i];
-    mtk_term2 /= pdim * atom->natoms;
+    if (pdim > 0) mtk_term2 /= pdim * atom->natoms;
   }
 
   if (pstyle == TRICLINIC) {

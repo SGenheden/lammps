@@ -23,13 +23,11 @@ class FixNHSphere : public FixNH {
   FixNHSphere(class LAMMPS *, int, char **);
   virtual ~FixNHSphere() {}
   void init();
-  virtual void initial_integrate(int);
-  void initial_integrate_respa(int, int, int);
 
  protected:
   void nve_v();
+  void nve_x();
   void nh_v_temp();
-  void update_dipole();
 };
 
 }

@@ -11,8 +11,8 @@
    See the README file in the top-level LAMMPS directory.
 ------------------------------------------------------------------------- */
 
-#include "string.h"
-#include "stdlib.h"
+#include <string.h>
+#include <stdlib.h>
 #include "update.h"
 #include "integrate.h"
 #include "min.h"
@@ -85,16 +85,6 @@ Update::~Update()
 
 void Update::init()
 {
-  // if USER-CUDA mode is enabled:
-  // integrate/minimize style must be CUDA variant
-
-  if (whichflag == 1 && lmp->cuda)
-    if (strstr(integrate_style,"cuda") == NULL)
-      error->all(FLERR,"USER-CUDA mode requires CUDA variant of run style");
-  if (whichflag == 2 && lmp->cuda)
-    if (strstr(minimize_style,"cuda") == NULL)
-      error->all(FLERR,"USER-CUDA mode requires CUDA variant of min style");
-
   // init the appropriate integrate and/or minimize class
   // if neither (e.g. from write_restart) then just return
 
@@ -261,8 +251,8 @@ void Update::set_units(const char *style)
 
     dt = 2.0;
     neighbor->skin = 0.1;
-                                              
-  } else if (strcmp(style,"nano") == 0) {  
+
+  } else if (strcmp(style,"nano") == 0) {
     force->boltz = 0.013806504;
     force->hplanck = 6.62606896e-4;
     force->mvv2e = 1.0;
@@ -279,7 +269,7 @@ void Update::set_units(const char *style)
     force->angstrom = 1.0e-1;
     force->femtosecond = 1.0e-6;
     force->qelectron = 1.0;
-       
+
     dt = 0.00045;
     neighbor->skin = 0.1;
 
@@ -339,11 +329,11 @@ void Update::new_integrate(char *style, int narg, char **arg,
 #include "style_integrate.h"
 #undef IntegrateStyle
 #undef INTEGRATE_CLASS
-      
+
       else success = 0;
       if (success) return;
     }
-    
+
     if (lmp->suffix2) {
       sflag = 2;
       char estyle[256];
@@ -358,7 +348,7 @@ void Update::new_integrate(char *style, int narg, char **arg,
 #include "style_integrate.h"
 #undef IntegrateStyle
 #undef INTEGRATE_CLASS
-      
+
       else success = 0;
       if (success) return;
     }
@@ -421,7 +411,6 @@ void Update::reset_timestep(bigint newstep)
 {
   ntimestep = newstep;
   if (ntimestep < 0) error->all(FLERR,"Timestep must be >= 0");
-  if (ntimestep > MAXBIGINT) error->all(FLERR,"Too big a timestep");
 
   // set atimestep to new timestep
   // so future update_time() calls will be correct
@@ -459,10 +448,9 @@ void Update::reset_timestep(bigint newstep)
   for (int i = 0; i < modify->ncompute; i++)
     if (modify->compute[i]->timeflag) modify->compute[i]->clearstep();
 
-  // set last_build of all neigh lists to -1 to force rebuild
+  // Neighbor Bin/Stencil/Pair classes store timestamps that need to be cleared
 
-  for (int i = 0; i < neighbor->nlist; i++)
-    neighbor->lists[i]->last_build = -1;
+  neighbor->reset_timestep(ntimestep);
 
   // NOTE: 7Jun12, adding rerun command, don't think this is required
 

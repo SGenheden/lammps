@@ -7,8 +7,8 @@ EXTRAMAKE = Makefile.lammps.empty
 # ------ SETTINGS ------
 
 CXX =		g++
-CXXFLAGS =	-O2 -mpc64 -march=native -funroll-loops -g \
-	-fno-rtti -fno-exceptions -Wall -Wno-sign-compare # -DCOLVARS_DEBUG
+CXXFLAGS =	-O2 -mpc64 -g -fPIC \
+	-Wall -Wno-sign-compare # -DCOLVARS_DEBUG
 ARCHIVE =	ar
 ARCHFLAG =	-rscv
 SHELL =		/bin/sh
@@ -19,7 +19,7 @@ SRC = colvaratoms.cpp colvarbias_abf.cpp colvarbias_alb.cpp colvarbias.cpp  \
  colvarbias_histogram.cpp colvarbias_meta.cpp colvarbias_restraint.cpp      \
  colvarcomp_angles.cpp colvarcomp_coordnums.cpp colvarcomp.cpp              \
  colvarcomp_distances.cpp colvarcomp_protein.cpp colvarcomp_rotations.cpp   \
- colvar.cpp colvargrid.cpp colvarmodule.cpp colvarparse.cpp                 \
+ colvardeps.cpp colvar.cpp colvargrid.cpp colvarmodule.cpp colvarparse.cpp  \
  colvarscript.cpp colvartypes.cpp colvarvalue.cpp
 
 LIB = libcolvars.a

@@ -11,7 +11,7 @@
    See the README file in the top-level LAMMPS directory.
 ------------------------------------------------------------------------- */
 
-#include "string.h"
+#include <string.h>
 #include "compute_vcm_chunk.h"
 #include "atom.h"
 #include "update.h"
@@ -117,7 +117,7 @@ void ComputeVCMChunk::compute_array()
 
   for (int i = 0; i < nchunk; i++)
     vcm[i][0] = vcm[i][1] = vcm[i][2] = 0.0;
-  if (massneed) 
+  if (massneed)
     for (int i = 0; i < nchunk; i++) massproc[i] = 0.0;
 
   // compute VCM for each chunk
@@ -142,13 +142,15 @@ void ComputeVCMChunk::compute_array()
     }
 
   MPI_Allreduce(&vcm[0][0],&vcmall[0][0],3*nchunk,MPI_DOUBLE,MPI_SUM,world);
-  if (massneed) 
+  if (massneed)
     MPI_Allreduce(massproc,masstotal,nchunk,MPI_DOUBLE,MPI_SUM,world);
 
   for (int i = 0; i < nchunk; i++) {
-    vcmall[i][0] /= masstotal[i];
-    vcmall[i][1] /= masstotal[i];
-    vcmall[i][2] /= masstotal[i];
+    if (masstotal[i] > 0.0) {
+      vcmall[i][0] /= masstotal[i];
+      vcmall[i][1] /= masstotal[i];
+      vcmall[i][2] /= masstotal[i];
+    } else vcmall[i][0] = vcmall[i][1] = vcmall[i][2] = 0.0;
   }
 }
 

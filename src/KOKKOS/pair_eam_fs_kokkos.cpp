@@ -15,10 +15,10 @@
    Contributing authors: Stan Moore (SNL)
 ------------------------------------------------------------------------- */
 
-#include "math.h"
-#include "stdio.h"
-#include "stdlib.h"
-#include "string.h"
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include "kokkos.h"
 #include "pair_kokkos.h"
 #include "pair_eam_fs_kokkos.h"
@@ -1180,7 +1180,10 @@ void PairEAMFSKokkos<DeviceType>::file2array_fs()
 
 /* ---------------------------------------------------------------------- */
 
+namespace LAMMPS_NS {
 template class PairEAMFSKokkos<LMPDeviceType>;
 #ifdef KOKKOS_HAVE_CUDA
 template class PairEAMFSKokkos<LMPHostType>;
 #endif
+}
+

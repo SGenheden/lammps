@@ -15,10 +15,10 @@
    Contributing author: Yongfeng Zhang (INL), yongfeng.zhang@inl.gov
 ------------------------------------------------------------------------- */
 
-#include "math.h"
-#include "stdio.h"
-#include "stdlib.h"
-#include "string.h"
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include "pair_coul_wolf.h"
 #include "atom.h"
 #include "comm.h"
@@ -36,7 +36,7 @@ using namespace MathConst;
 
 PairCoulWolf::PairCoulWolf(LAMMPS *lmp) : Pair(lmp)
 {
-  single_enable = 0;
+  single_enable = 0;        // NOTE: single() method below is not yet correct
 }
 
 /* ---------------------------------------------------------------------- */

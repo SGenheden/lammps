@@ -1,13 +1,13 @@
 /*
 //@HEADER
 // ************************************************************************
-// 
+//
 //                        Kokkos v. 2.0
 //              Copyright (2014) Sandia Corporation
-// 
+//
 // Under the terms of Contract DE-AC04-94AL85000 with Sandia Corporation,
 // the U.S. Government retains certain rights in this software.
-// 
+//
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -36,7 +36,7 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
 // Questions? Contact  H. Carter Edwards (hcedwar@sandia.gov)
-// 
+//
 // ************************************************************************
 //@HEADER
 */
@@ -106,9 +106,9 @@ public:
 
   //! The type of a Kokkos::View on the device.
   typedef View< typename traits::data_type ,
-                typename traits::array_layout ,
-                typename traits::device_type ,
-                typename traits::memory_traits > t_dev ;
+                Arg1Type ,
+                Arg2Type ,
+                Arg3Type > t_dev ;
 
   /// \typedef t_host
   /// \brief The type of a Kokkos::View host mirror of \c t_dev.
@@ -117,9 +117,9 @@ public:
   //! The type of a const View on the device.
   //! The type of a Kokkos::View on the device.
   typedef View< typename traits::const_data_type ,
-                typename traits::array_layout ,
-                typename traits::device_type ,
-                typename traits::memory_traits > t_dev_const ;
+                Arg1Type ,
+                Arg2Type ,
+                Arg3Type > t_dev_const ;
 
   /// \typedef t_host_const
   /// \brief The type of a const View host mirror of \c t_dev_const.
@@ -129,7 +129,7 @@ public:
   typedef View< typename traits::const_data_type ,
                 typename traits::array_layout ,
                 typename traits::device_type ,
-                MemoryRandomAccess > t_dev_const_randomread ;
+                Kokkos::MemoryTraits<Kokkos::RandomAccess> > t_dev_const_randomread ;
 
   /// \typedef t_host_const_randomread
   /// \brief The type of a const, random-access View host mirror of
@@ -159,6 +159,17 @@ public:
                typename t_host::array_layout,
                typename t_host::device_type,
                MemoryUnmanaged> t_host_const_um;
+
+  //! The type of a const, random-access View on the device.
+  typedef View< typename t_host::const_data_type ,
+                typename t_host::array_layout ,
+                typename t_host::device_type ,
+                Kokkos::MemoryTraits<Kokkos::Unmanaged|Kokkos::RandomAccess> > t_dev_const_randomread_um ;
+
+  /// \typedef t_host_const_randomread
+  /// \brief The type of a const, random-access View host mirror of
+  ///   \c t_dev_const_randomread.
+  typedef typename t_dev_const_randomread::HostMirror t_host_const_randomread_um;
 
   //@}
   //! \name The two View instances.
@@ -221,6 +232,19 @@ public:
     modified_host (src.modified_host)
   {}
 
+  //! Subview constructor
+  template< class SD, class S1 , class S2 , class S3
+          , class Arg0 , class ... Args >
+  DualView( const DualView<SD,S1,S2,S3> & src
+          , const Arg0 & arg0
+          , Args ... args
+          )
+    : d_view( Kokkos::subview( src.d_view , arg0 , args ... ) )
+    , h_view( Kokkos::subview( src.h_view , arg0 , args ... ) )
+    , modified_device (src.modified_device)
+    , modified_host (src.modified_host)
+    {}
+
   /// \brief Create DualView from existing device and host View objects.
   ///
   /// This constructor assumes that the device and host View objects
@@ -237,7 +261,30 @@ public:
     modified_device (View<unsigned int,LayoutLeft,typename t_host::execution_space> ("DualView::modified_device")),
     modified_host (View<unsigned int,LayoutLeft,typename t_host::execution_space> ("DualView::modified_host"))
   {
+#if ! KOKKOS_USING_EXP_VIEW
     Impl::assert_shapes_are_equal (d_view.shape (), h_view.shape ());
+#else
+    if ( int(d_view.rank)     != int(h_view.rank) ||
+         d_view.dimension_0() != h_view.dimension_0() ||
+         d_view.dimension_1() != h_view.dimension_1() ||
+         d_view.dimension_2() != h_view.dimension_2() ||
+         d_view.dimension_3() != h_view.dimension_3() ||
+         d_view.dimension_4() != h_view.dimension_4() ||
+         d_view.dimension_5() != h_view.dimension_5() ||
+         d_view.dimension_6() != h_view.dimension_6() ||
+         d_view.dimension_7() != h_view.dimension_7() ||
+         d_view.stride_0()    != h_view.stride_0() ||
+         d_view.stride_1()    != h_view.stride_1() ||
+         d_view.stride_2()    != h_view.stride_2() ||
+         d_view.stride_3()    != h_view.stride_3() ||
+         d_view.stride_4()    != h_view.stride_4() ||
+         d_view.stride_5()    != h_view.stride_5() ||
+         d_view.stride_6()    != h_view.stride_6() ||
+         d_view.stride_7()    != h_view.stride_7() ||
+         d_view.span()        != h_view.span() ) {
+      Kokkos::Impl::throw_runtime_exception("DualView constructed with incompatible views");
+    }
+#endif
   }
 
   //@}
@@ -352,6 +399,29 @@ public:
       }
     }
   }
+
+  template<class Device>
+  bool need_sync() const
+  {
+    const unsigned int dev =
+      Impl::if_c<
+        Impl::is_same<
+          typename t_dev::memory_space,
+          typename Device::memory_space>::value ,
+        unsigned int,
+        unsigned int>::select (1, 0);
+
+    if (dev) { // if Device is the same as DualView's device type
+      if ((modified_host () > 0) && (modified_host () >= modified_device ())) {
+        return true;
+      }
+    } else { // hopefully Device is the same as DualView's host type
+      if ((modified_device () > 0) && (modified_device () >= modified_host ())) {
+        return true;
+      }
+    }
+    return false;
+  }
   /// \brief Mark data as modified on the given device \c Device.
   ///
   /// If \c Device is the same as this DualView's device type, then
@@ -444,7 +514,7 @@ public:
 
   //! The allocation size (same as Kokkos::View::capacity).
   size_t capacity() const {
-#if defined( KOKKOS_USING_EXPERIMENTAL_VIEW )
+#if KOKKOS_USING_EXP_VIEW
     return d_view.span();
 #else
     return d_view.capacity();
@@ -478,6 +548,52 @@ public:
 };
 
 } // namespace Kokkos
+
+//----------------------------------------------------------------------------
+//----------------------------------------------------------------------------
+//
+// Partial specializations of Kokkos::subview() for DualView objects.
+//
+
+#if KOKKOS_USING_EXP_VIEW
+
+namespace Kokkos {
+namespace Impl {
+
+template< class D, class A1, class A2, class A3, class ... Args >
+struct DualViewSubview {
+
+  typedef typename Kokkos::Experimental::Impl::ViewMapping
+    < void
+    , Kokkos::ViewTraits< D, A1, A2, A3 >
+    , Args ...
+    >::traits_type dst_traits ;
+
+  typedef Kokkos::DualView
+    < typename dst_traits::data_type
+    , typename dst_traits::array_layout
+    , typename dst_traits::device_type
+    , typename dst_traits::memory_traits
+    > type ;
+};
+
+} /* namespace Impl */
+
+
+template< class D , class A1 , class A2 , class A3 , class ... Args >
+typename Impl::DualViewSubview<D,A1,A2,A3,Args...>::type
+subview( const DualView<D,A1,A2,A3> & src , Args ... args )
+{
+  return typename
+    Impl::DualViewSubview<D,A1,A2,A3,Args...>::type( src , args ... );
+}
+
+} /* namespace Kokkos */
+
+#else
+
+//----------------------------------------------------------------------------
+//----------------------------------------------------------------------------
 //
 // Partial specializations of Kokkos::subview() for DualView objects.
 //
@@ -816,6 +932,15 @@ subview( const DualView<D,A1,A2,A3> & src ,
   return sub_view;
 }
 
+} // namespace Kokkos
+
+#endif /* KOKKOS_USING_EXP_VIEW */
+
+//----------------------------------------------------------------------------
+//----------------------------------------------------------------------------
+
+namespace Kokkos {
+
 //
 // Partial specialization of Kokkos::deep_copy() for DualView objects.
 //
@@ -831,6 +956,23 @@ deep_copy (DualView<DT,DL,DD,DM> dst, // trust me, this must not be a reference
     dst.template modify<typename DualView<DT,DL,DD,DM>::device_type> ();
   } else {
     deep_copy (dst.h_view, src.h_view);
+    dst.template modify<typename DualView<DT,DL,DD,DM>::host_mirror_space> ();
+  }
+}
+
+template< class ExecutionSpace ,
+          class DT , class DL , class DD , class DM ,
+          class ST , class SL , class SD , class SM >
+void
+deep_copy (const ExecutionSpace& exec ,
+           DualView<DT,DL,DD,DM> dst, // trust me, this must not be a reference
+           const DualView<ST,SL,SD,SM>& src )
+{
+  if (src.modified_device () >= src.modified_host ()) {
+    deep_copy (exec, dst.d_view, src.d_view);
+    dst.template modify<typename DualView<DT,DL,DD,DM>::device_type> ();
+  } else {
+    deep_copy (exec, dst.h_view, src.h_view);
     dst.template modify<typename DualView<DT,DL,DD,DM>::host_mirror_space> ();
   }
 }

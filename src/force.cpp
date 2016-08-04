@@ -11,9 +11,9 @@
    See the README file in the top-level LAMMPS directory.
 ------------------------------------------------------------------------- */
 
-#include "stdlib.h"
-#include "string.h"
-#include "ctype.h"
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
 #include "force.h"
 #include "style_bond.h"
 #include "style_angle.h"
@@ -130,6 +130,13 @@ void Force::init()
   if (improper) improper->init();
 }
 
+/* ---------------------------------------------------------------------- */
+
+void Force::setup()
+{
+  if (pair) pair->setup();
+}
+
 /* ----------------------------------------------------------------------
    create a pair style, called from input script or restart file
 ------------------------------------------------------------------------- */
@@ -198,10 +205,11 @@ Pair *Force::pair_creator(LAMMPS *lmp)
    return ptr to Pair class if matches word or matches hybrid sub-style
    if exact, then style name must be exact match to word
    if not exact, style name must contain word
-   return NULL if no match or multiple sub-styles match
+   if nsub > 0, match Nth hybrid sub-style
+   return NULL if no match or if nsub=0 and multiple sub-styles match
 ------------------------------------------------------------------------- */
 
-Pair *Force::pair_match(const char *word, int exact)
+Pair *Force::pair_match(const char *word, int exact, int nsub)
 {
   int iwhich,count;
 
@@ -216,6 +224,7 @@ Pair *Force::pair_match(const char *word, int exact)
           (!exact && strstr(hybrid->keywords[i],word))) {
         iwhich = i;
         count++;
+        if (nsub == count) return hybrid->styles[iwhich];
       }
     if (count == 1) return hybrid->styles[iwhich];
 
@@ -227,8 +236,28 @@ Pair *Force::pair_match(const char *word, int exact)
           (!exact && strstr(hybrid->keywords[i],word))) {
         iwhich = i;
         count++;
+        if (nsub == count) return hybrid->styles[iwhich];
       }
     if (count == 1) return hybrid->styles[iwhich];
+  }
+
+  return NULL;
+}
+
+/* ----------------------------------------------------------------------
+   return style name of Pair class that matches Pair ptr
+   called by Neighbor::print_neigh_info()
+   return NULL if no match
+------------------------------------------------------------------------- */
+
+char *Force::pair_match_ptr(Pair *ptr)
+{
+  if (ptr == pair) return pair_style;
+
+  if (strstr(pair_style,"hybrid")) {
+    PairHybrid *hybrid = (PairHybrid *) pair;
+    for (int i = 0; i < hybrid->nstyles; i++)
+      if (ptr == hybrid->styles[i]) return hybrid->keywords[i];
   }
 
   return NULL;
@@ -380,6 +409,21 @@ Angle *Force::new_angle(const char *style, int trysuffix, int &sflag)
 }
 
 /* ----------------------------------------------------------------------
+   return ptr to current angle class or hybrid sub-class if matches style
+------------------------------------------------------------------------- */
+
+Angle *Force::angle_match(const char *style)
+{
+  if (strcmp(angle_style,style) == 0) return angle;
+  else if (strcmp(angle_style,"hybrid") == 0) {
+    AngleHybrid *hybrid = (AngleHybrid *) angle;
+    for (int i = 0; i < hybrid->nstyles; i++)
+      if (strcmp(hybrid->keywords[i],style) == 0) return hybrid->styles[i];
+  }
+  return NULL;
+}
+
+/* ----------------------------------------------------------------------
    create a dihedral style, called from input script or restart file
 ------------------------------------------------------------------------- */
 
@@ -415,7 +459,7 @@ Dihedral *Force::new_dihedral(const char *style, int trysuffix, int &sflag)
 #undef DIHEDRAL_CLASS
     }
 
-    if (lmp->suffix) {
+    if (lmp->suffix2) {
       sflag = 2;
       char estyle[256];
       sprintf(estyle,"%s/%s",style,lmp->suffix2);
@@ -442,6 +486,21 @@ Dihedral *Force::new_dihedral(const char *style, int trysuffix, int &sflag)
 #undef DIHEDRAL_CLASS
 
   else error->all(FLERR,"Unknown dihedral style");
+  return NULL;
+}
+
+/* ----------------------------------------------------------------------
+   return ptr to current angle class or hybrid sub-class if matches style
+------------------------------------------------------------------------- */
+
+Dihedral *Force::dihedral_match(const char *style)
+{
+  if (strcmp(dihedral_style,style) == 0) return dihedral;
+  else if (strcmp(dihedral_style,"hybrid") == 0) {
+    DihedralHybrid *hybrid = (DihedralHybrid *) dihedral;
+    for (int i = 0; i < hybrid->nstyles; i++)
+      if (strcmp(hybrid->keywords[i],style) == 0) return hybrid->styles[i];
+  }
   return NULL;
 }
 
@@ -518,7 +577,7 @@ Improper *Force::improper_match(const char *style)
 {
   if (strcmp(improper_style,style) == 0) return improper;
   else if (strcmp(improper_style,"hybrid") == 0) {
-    ImproperHybrid *hybrid = (ImproperHybrid *) bond;
+    ImproperHybrid *hybrid = (ImproperHybrid *) improper;
     for (int i = 0; i < hybrid->nstyles; i++)
       if (strcmp(hybrid->keywords[i],style) == 0) return hybrid->styles[i];
   }
@@ -756,7 +815,7 @@ void Force::bounds(char *str, int nmax, int &nlo, int &nhi, int nmin)
     nhi = atoi(ptr+1);
   }
 
-  if (nlo < nmin || nhi > nmax)
+  if (nlo < nmin || nhi > nmax || nlo > nhi)
     error->all(FLERR,"Numeric index is out of bounds");
 }
 
@@ -790,7 +849,7 @@ void Force::boundsbig(char *str, bigint nmax, bigint &nlo, bigint &nhi,
     nhi = ATOBIGINT(ptr+1);
   }
 
-  if (nlo < nmin || nhi > nmax)
+  if (nlo < nmin || nhi > nmax || nlo > nhi)
     error->all(FLERR,"Numeric index is out of bounds");
 }
 

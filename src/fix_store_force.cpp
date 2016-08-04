@@ -11,7 +11,7 @@
    See the README file in the top-level LAMMPS directory.
 ------------------------------------------------------------------------- */
 
-#include "string.h"
+#include <string.h>
 #include "fix_store_force.h"
 #include "atom.h"
 #include "update.h"
@@ -96,7 +96,7 @@ void FixStoreForce::min_setup(int vflag)
 
 void FixStoreForce::post_force(int vflag)
 {
-  if (atom->nlocal > nmax) {
+  if (atom->nmax > nmax) {
     nmax = atom->nmax;
     memory->destroy(foriginal);
     memory->create(foriginal,nmax,3,"store/force:foriginal");

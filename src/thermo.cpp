@@ -15,11 +15,11 @@
 // due to OpenMPI bug which sets INT64_MAX via its mpi.h
 //   before lmptype.h can set flags to insure it is done correctly
 
-#include "lmptype.h" 
-#include "mpi.h"
-#include "math.h"
-#include "stdlib.h"
-#include "string.h"
+#include "lmptype.h"
+#include <mpi.h>
+#include <math.h>
+#include <stdlib.h>
+#include <string.h>
 #include "thermo.h"
 #include "atom.h"
 #include "update.h"
@@ -46,13 +46,16 @@
 #include "math_const.h"
 #include "memory.h"
 #include "error.h"
+#include "universe.h"
+
+#include "math_const.h"
 
 using namespace LAMMPS_NS;
 using namespace MathConst;
 
 // customize a new keyword by adding to this list:
 
-// step, elapsed, elaplong, dt, time, cpu, tpcpu, spcpu, cpuremain, part
+// step, elapsed, elaplong, dt, time, cpu, tpcpu, spcpu, cpuremain, part, timeremain
 // atoms, temp, press, pe, ke, etotal, enthalpy
 // evdwl, ecoul, epair, ebond, eangle, edihed, eimp, emol, elong, etail
 // vol, density, lx, ly, lz, xlo, xhi, ylo, yhi, zlo, zhi, xy, xz, yz,
@@ -99,7 +102,7 @@ Thermo::Thermo(LAMMPS *lmp, int narg, char **arg) : Pointers(lmp)
   flushflag = 0;
 
   // set style and corresponding lineflag
-  // custom style builds its own line of keywords
+  // custom style builds its own line of keywords, including wildcard expansion
   // customize a new thermo style by adding to if statement
   // allocate line string used for 3 tasks
   //   concat of custom style args
@@ -118,13 +121,28 @@ Thermo::Thermo(LAMMPS *lmp, int narg, char **arg) : Pointers(lmp)
 
   } else if (strcmp(style,"custom") == 0) {
     if (narg == 1) error->all(FLERR,"Illegal thermo style custom command");
-    line = new char[256+narg*64];
+
+    // expand args if any have wildcard character "*"
+
+    int expand = 0;
+    char **earg;
+    int nvalues = input->expand_args(narg-1,&arg[1],0,earg);
+    if (earg != &arg[1]) expand = 1;
+
+    line = new char[256+nvalues*64];
     line[0] = '\0';
-    for (int iarg = 1; iarg < narg; iarg++) {
-      strcat(line,arg[iarg]);
+    for (int iarg = 0; iarg < nvalues; iarg++) {
+      strcat(line,earg[iarg]);
       strcat(line," ");
     }
     line[strlen(line)-1] = '\0';
+
+    // if wildcard expansion occurred, free earg memory from exapnd_args()
+
+    if (expand) {
+      for (int i = 0; i < nvalues; i++) delete [] earg[i];
+      memory->sfree(earg);
+    }
 
   } else error->all(FLERR,"Illegal thermo style command");
 
@@ -235,16 +253,12 @@ void Thermo::init()
   }
 
   // find current ptr for each Compute ID
-  // cudable = 0 if any compute used by Thermo is non-CUDA
-
-  cudable = 1;
 
   int icompute;
   for (i = 0; i < ncompute; i++) {
     icompute = modify->find_compute(id_compute[i]);
     if (icompute < 0) error->all(FLERR,"Could not find thermo compute ID");
     computes[i] = modify->compute[icompute];
-    cudable = cudable && computes[i]->cudable;
   }
 
   // find current ptr for each Fix ID
@@ -335,7 +349,7 @@ void Thermo::compute(int flag)
   int loc = 0;
   if (lineflag == MULTILINE) {
     double cpu;
-    if (flag) cpu = timer->elapsed(TIME_LOOP);
+    if (flag) cpu = timer->elapsed(Timer::TOTAL);
     else cpu = 0.0;
     loc = sprintf(&line[loc],format_multi,ntimestep,cpu);
   }
@@ -375,7 +389,7 @@ bigint Thermo::lost_check()
   bigint ntotal;
   bigint nblocal = atom->nlocal;
   MPI_Allreduce(&nblocal,&ntotal,1,MPI_LMP_BIGINT,MPI_SUM,world);
-  if (ntotal < 0 || ntotal > MAXBIGINT)
+  if (ntotal < 0)
     error->all(FLERR,"Too many total atoms");
   if (ntotal == atom->natoms) return ntotal;
 
@@ -574,7 +588,7 @@ void Thermo::allocate()
   int n = nfield_initial + 1;
 
   keyword = new char*[n];
-  for (int i = 0; i < n; i++) keyword[i] = new char[32];
+  for (int i = 0; i < n; i++) keyword[i] = NULL;
   vfunc = new FnPtr[n];
   vtype = new int[n];
 
@@ -673,6 +687,8 @@ void Thermo::parse_fields(char *str)
       addfield("CPULeft",&Thermo::compute_cpuremain,FLOAT);
     } else if (strcmp(word,"part") == 0) {
       addfield("Part",&Thermo::compute_part,INT);
+    } else if (strcmp(word,"timeremain") == 0) {
+      addfield("TimeoutLeft",&Thermo::compute_timeremain,FLOAT);
 
     } else if (strcmp(word,"atoms") == 0) {
       addfield("Atoms",&Thermo::compute_atoms,BIGINT);
@@ -820,7 +836,6 @@ void Thermo::parse_fields(char *str)
 
     // compute value = c_ID, fix value = f_ID, variable value = v_ID
     // count trailing [] and store int arguments
-    // copy = at most 8 chars of ID to pass to addfield
 
     } else if ((strncmp(word,"c_",2) == 0) || (strncmp(word,"f_",2) == 0) ||
                (strncmp(word,"v_",2) == 0)) {
@@ -828,22 +843,19 @@ void Thermo::parse_fields(char *str)
       int n = strlen(word);
       char *id = new char[n];
       strcpy(id,&word[2]);
-      char copy[9];
-      strncpy(copy,id,8);
-      copy[8] = '\0';
 
       // parse zero or one or two trailing brackets from ID
       // argindex1,argindex2 = int inside each bracket pair, 0 if no bracket
 
       char *ptr = strchr(id,'[');
-      if (ptr == NULL) argindex1[nfield] = 0;
+      if (ptr == NULL) argindex1[nfield] = argindex2[nfield] = 0;
       else {
         *ptr = '\0';
-        argindex1[nfield] = 
+        argindex1[nfield] =
           (int) input->variable->int_between_brackets(ptr,0);
         ptr++;
         if (*ptr == '[') {
-          argindex2[nfield] = 
+          argindex2[nfield] =
             (int) input->variable->int_between_brackets(ptr,0);
           ptr++;
         } else argindex2[nfield] = 0;
@@ -877,7 +889,7 @@ void Thermo::parse_fields(char *str)
           field2index[nfield] = add_compute(id,VECTOR);
         else
           field2index[nfield] = add_compute(id,ARRAY);
-        addfield(copy,&Thermo::compute_compute,FLOAT);
+        addfield(word,&Thermo::compute_compute,FLOAT);
 
       } else if (word[0] == 'f') {
         n = modify->find_fix(id);
@@ -887,7 +899,7 @@ void Thermo::parse_fields(char *str)
         if (argindex1[nfield] > 0 && argindex2[nfield] == 0) {
           if (modify->fix[n]->vector_flag == 0)
             error->all(FLERR,"Thermo fix does not compute vector");
-          if (argindex1[nfield] > modify->fix[n]->size_vector && 
+          if (argindex1[nfield] > modify->fix[n]->size_vector &&
               modify->fix[n]->size_vector_variable == 0)
             error->all(FLERR,"Thermo fix vector is accessed out-of-range");
         }
@@ -902,20 +914,23 @@ void Thermo::parse_fields(char *str)
         }
 
         field2index[nfield] = add_fix(id);
-        addfield(copy,&Thermo::compute_fix,FLOAT);
+        addfield(word,&Thermo::compute_fix,FLOAT);
 
       } else if (word[0] == 'v') {
         n = input->variable->find(id);
-        if (n < 0) 
+        if (n < 0)
           error->all(FLERR,"Could not find thermo custom variable name");
-        if (input->variable->equalstyle(n) == 0)
+        if (argindex1[nfield] == 0 && input->variable->equalstyle(n) == 0)
           error->all(FLERR,
                      "Thermo custom variable is not equal-style variable");
-        if (argindex1[nfield])
-          error->all(FLERR,"Thermo custom variable cannot be indexed");
+        if (argindex1[nfield] && input->variable->vectorstyle(n) == 0)
+          error->all(FLERR,
+                     "Thermo custom variable is not vector-style variable");
+        if (argindex2[nfield])
+          error->all(FLERR,"Thermo custom variable cannot have two indices");
 
         field2index[nfield] = add_variable(id);
-        addfield(copy,&Thermo::compute_variable,FLOAT);
+        addfield(word,&Thermo::compute_variable,FLOAT);
       }
 
       delete [] id;
@@ -932,6 +947,8 @@ void Thermo::parse_fields(char *str)
 
 void Thermo::addfield(const char *key, FnPtr func, int typeflag)
 {
+  int n = strlen(key) + 1;
+  keyword[nfield] = new char[n];
   strcpy(keyword[nfield],key);
   vfunc[nfield] = func;
   vtype[nfield] = typeflag;
@@ -987,7 +1004,7 @@ int Thermo::add_variable(const char *id)
 }
 
 /* ----------------------------------------------------------------------
-   compute a single thermodyanmic value, word is any keyword in custom list
+   compute a single thermodynamic value, word is any keyword in custom list
    called when a variable is evaluated by Variable class
    return value as double in answer
    return 0 if str is recoginzed keyword, 1 if unrecognized
@@ -1007,9 +1024,13 @@ int Thermo::evaluate_keyword(char *word, double *answer)
   // if keyword requires a compute, error if thermo doesn't use the compute
   // if inbetween runs and needed compute is not current, error
   // if in middle of run and needed compute is not current, invoke it
-  // for keywords that use pe indirectly (evdwl, ebond, etc):
+  // for keywords that use energy (evdwl, ebond, etc):
   //   check if energy was tallied on this timestep and set pe->invoked_flag
   //   this will trigger next timestep for energy tallying via addstep()
+  //   this means keywords that use pe (pe, etotal, enthalpy)
+  //     need to always invoke it even if invoked_flag is set,
+  //     because evdwl/etc may have set invoked_flag w/out 
+  //       actually invoking pe->compute_scalar()
 
   if (strcmp(word,"step") == 0) {
     compute_step();
@@ -1063,6 +1084,10 @@ int Thermo::evaluate_keyword(char *word, double *answer)
     compute_part();
     dvalue = ivalue;
 
+  } else if (strcmp(word,"timeremain") == 0) {
+    compute_timeremain();
+
+
   } else if (strcmp(word,"atoms") == 0) {
     compute_atoms();
     dvalue = bivalue;
@@ -1103,7 +1128,7 @@ int Thermo::evaluate_keyword(char *word, double *answer)
       if (pe->invoked_scalar != update->ntimestep)
         error->all(FLERR,"Compute used in variable thermo keyword between runs "
                    "is not current");
-    } else if (!(pe->invoked_flag & INVOKED_SCALAR)) {
+    } else {
       pe->compute_scalar();
       pe->invoked_flag |= INVOKED_SCALAR;
     }
@@ -1131,7 +1156,7 @@ int Thermo::evaluate_keyword(char *word, double *answer)
       if (pe->invoked_scalar != update->ntimestep)
         error->all(FLERR,"Compute used in variable thermo keyword between runs "
                    "is not current");
-    } else if (!(pe->invoked_flag & INVOKED_SCALAR)) {
+    } else {
       pe->compute_scalar();
       pe->invoked_flag |= INVOKED_SCALAR;
     }
@@ -1156,7 +1181,7 @@ int Thermo::evaluate_keyword(char *word, double *answer)
       if (pe->invoked_scalar != update->ntimestep)
         error->all(FLERR,"Compute used in variable thermo keyword between runs "
                    "is not current");
-    } else if (!(pe->invoked_flag & INVOKED_SCALAR)) {
+    } else {
       pe->compute_scalar();
       pe->invoked_flag |= INVOKED_SCALAR;
     }
@@ -1268,10 +1293,6 @@ int Thermo::evaluate_keyword(char *word, double *answer)
   } else if (strcmp(word,"etail") == 0) {
     if (update->eflag_global != update->ntimestep)
       error->all(FLERR,"Energy was not tallied on needed timestep");
-    if (!pe)
-      error->all(FLERR,
-                 "Thermo keyword in variable requires thermo to use/init pe");
-    pe->invoked_flag |= INVOKED_SCALAR;
     compute_etail();
 
   } else if (strcmp(word,"vol") == 0) compute_vol();
@@ -1428,7 +1449,7 @@ void Thermo::compute_compute()
     dvalue = compute->scalar;
     if (normflag && compute->extscalar) dvalue /= natoms;
   } else if (compute_which[m] == VECTOR) {
-    if (compute->size_vector_variable && argindex1[ifield] > 
+    if (compute->size_vector_variable && argindex1[ifield] >
         compute->size_vector) dvalue = 0.0;
     else dvalue = compute->vector[argindex1[ifield]-1];
     if (normflag) {
@@ -1437,7 +1458,7 @@ void Thermo::compute_compute()
       else if (compute->extlist[argindex1[ifield]-1]) dvalue /= natoms;
     }
   } else {
-    if (compute->size_array_rows_variable && argindex1[ifield] > 
+    if (compute->size_array_rows_variable && argindex1[ifield] >
         compute->size_array_rows) dvalue = 0.0;
     else dvalue = compute->array[argindex1[ifield]-1][argindex2[ifield]-1];
     if (normflag && compute->extarray) dvalue /= natoms;
@@ -1471,7 +1492,17 @@ void Thermo::compute_fix()
 
 void Thermo::compute_variable()
 {
-  dvalue = input->variable->compute_equal(variables[field2index[ifield]]);
+  int iarg = argindex1[ifield];
+
+  if (iarg == 0)
+    dvalue = input->variable->compute_equal(variables[field2index[ifield]]);
+  else {
+    double *varvec;
+    int nvec = 
+      input->variable->compute_vector(variables[field2index[ifield]],&varvec);
+    if (nvec < iarg) dvalue = 0.0;
+    else dvalue = varvec[iarg-1];
+  }
 }
 
 /* ----------------------------------------------------------------------
@@ -1520,7 +1551,7 @@ void Thermo::compute_time()
 void Thermo::compute_cpu()
 {
   if (firststep == 0) dvalue = 0.0;
-  else dvalue = timer->elapsed(TIME_LOOP);
+  else dvalue = timer->elapsed(Timer::TOTAL);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -1534,7 +1565,7 @@ void Thermo::compute_tpcpu()
     new_cpu = 0.0;
     dvalue = 0.0;
   } else {
-    new_cpu = timer->elapsed(TIME_LOOP);
+    new_cpu = timer->elapsed(Timer::TOTAL);
     double cpu_diff = new_cpu - last_tpcpu;
     double time_diff = new_time - last_time;
     if (time_diff > 0.0 && cpu_diff > 0.0) dvalue = time_diff/cpu_diff;
@@ -1556,7 +1587,7 @@ void Thermo::compute_spcpu()
     new_cpu = 0.0;
     dvalue = 0.0;
   } else {
-    new_cpu = timer->elapsed(TIME_LOOP);
+    new_cpu = timer->elapsed(Timer::TOTAL);
     double cpu_diff = new_cpu - last_spcpu;
     int step_diff = new_step - last_step;
     if (cpu_diff > 0.0) dvalue = step_diff/cpu_diff;
@@ -1572,7 +1603,7 @@ void Thermo::compute_spcpu()
 void Thermo::compute_cpuremain()
 {
   if (firststep == 0) dvalue = 0.0;
-  else dvalue = timer->elapsed(TIME_LOOP) * 
+  else dvalue = timer->elapsed(Timer::TOTAL) *
          (update->laststep - update->ntimestep) /
          (update->ntimestep - update->firststep);
 }
@@ -1582,6 +1613,13 @@ void Thermo::compute_cpuremain()
 void Thermo::compute_part()
 {
   ivalue = universe->iworld;
+}
+
+/* ---------------------------------------------------------------------- */
+
+void Thermo::compute_timeremain()
+{
+  dvalue = timer->get_timeout_remain();
 }
 
 /* ---------------------------------------------------------------------- */
@@ -2093,3 +2131,4 @@ void Thermo::compute_cellgamma()
     dvalue = acos(cosgamma)*180.0/MY_PI;
   }
 }
+

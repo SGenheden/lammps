@@ -11,8 +11,8 @@
    See the README file in the top-level LAMMPS directory.
 ------------------------------------------------------------------------- */
 
-#include "stdio.h"
-#include "string.h"
+#include <stdio.h>
+#include <string.h>
 #include "modify.h"
 #include "style_compute.h"
 #include "style_fix.h"
@@ -28,12 +28,14 @@
 #include "memory.h"
 #include "error.h"
 
+#include <map>
+
 using namespace LAMMPS_NS;
 using namespace FixConst;
 
 #define DELTA 4
 #define BIG 1.0e20
-#define NEXCEPT 5       // change when add to exceptions in add_fix()
+#define NEXCEPT 7       // change when add to exceptions in add_fix()
 
 /* ---------------------------------------------------------------------- */
 
@@ -42,8 +44,9 @@ Modify::Modify(LAMMPS *lmp) : Pointers(lmp)
   nfix = maxfix = 0;
   n_initial_integrate = n_post_integrate = 0;
   n_pre_exchange = n_pre_neighbor = 0;
-  n_pre_force = n_post_force = 0;
+  n_pre_force = n_pre_reverse = n_post_force = 0;
   n_final_integrate = n_end_of_step = n_thermo_energy = 0;
+  n_thermo_energy_atom = 0;
   n_initial_integrate_respa = n_post_integrate_respa = 0;
   n_pre_force_respa = n_post_force_respa = n_final_integrate_respa = 0;
   n_min_pre_exchange = n_min_pre_force = n_min_post_force = n_min_energy = 0;
@@ -52,9 +55,9 @@ Modify::Modify(LAMMPS *lmp) : Pointers(lmp)
   fmask = NULL;
   list_initial_integrate = list_post_integrate = NULL;
   list_pre_exchange = list_pre_neighbor = NULL;
-  list_pre_force = list_post_force = NULL;
+  list_pre_force = list_pre_reverse = list_post_force = NULL;
   list_final_integrate = list_end_of_step = NULL;
-  list_thermo_energy = NULL;
+  list_thermo_energy = list_thermo_energy_atom = NULL;
   list_initial_integrate_respa = list_post_integrate_respa = NULL;
   list_pre_force_respa = list_post_force_respa = NULL;
   list_final_integrate_respa = NULL;
@@ -119,10 +122,12 @@ Modify::~Modify()
   delete [] list_pre_exchange;
   delete [] list_pre_neighbor;
   delete [] list_pre_force;
+  delete [] list_pre_reverse;
   delete [] list_post_force;
   delete [] list_final_integrate;
   delete [] list_end_of_step;
   delete [] list_thermo_energy;
+  delete [] list_thermo_energy_atom;
   delete [] list_initial_integrate_respa;
   delete [] list_post_integrate_respa;
   delete [] list_pre_force_respa;
@@ -162,10 +167,12 @@ void Modify::init()
   list_init(PRE_EXCHANGE,n_pre_exchange,list_pre_exchange);
   list_init(PRE_NEIGHBOR,n_pre_neighbor,list_pre_neighbor);
   list_init(PRE_FORCE,n_pre_force,list_pre_force);
+  list_init(PRE_REVERSE,n_pre_reverse,list_pre_reverse);
   list_init(POST_FORCE,n_post_force,list_post_force);
   list_init(FINAL_INTEGRATE,n_final_integrate,list_final_integrate);
   list_init_end_of_step(END_OF_STEP,n_end_of_step,list_end_of_step);
   list_init_thermo_energy(THERMO_ENERGY,n_thermo_energy,list_thermo_energy);
+  list_init_thermo_energy_atom(n_thermo_energy_atom,list_thermo_energy_atom);
 
   list_init(INITIAL_INTEGRATE_RESPA,
             n_initial_integrate_respa,list_initial_integrate_respa);
@@ -229,7 +236,7 @@ void Modify::init()
     }
 
   for (i = 0; i < ncompute; i++)
-    if (!compute[i]->dynamic_group_allow && 
+    if (!compute[i]->dynamic_group_allow &&
         group->dynamic[compute[i]->igroup]) {
       char str[128];
       sprintf(str,"Compute %s does not allow use of dynamic group",fix[i]->id);
@@ -382,6 +389,15 @@ void Modify::pre_force(int vflag)
   for (int i = 0; i < n_pre_force; i++)
     fix[list_pre_force[i]]->pre_force(vflag);
 }
+/* ----------------------------------------------------------------------
+   pre_reverse call, only for relevant fixes
+------------------------------------------------------------------------- */
+
+void Modify::pre_reverse(int eflag, int vflag)
+{
+  for (int i = 0; i < n_pre_reverse; i++)
+    fix[list_pre_reverse[i]]->pre_reverse(eflag,vflag);
+}
 
 /* ----------------------------------------------------------------------
    post_force call, only for relevant fixes
@@ -427,6 +443,23 @@ double Modify::thermo_energy()
   for (int i = 0; i < n_thermo_energy; i++)
     energy += fix[list_thermo_energy[i]]->compute_scalar();
   return energy;
+}
+
+/* ----------------------------------------------------------------------
+   per-atom thermo energy call, only for relevant fixes
+   called by compute pe/atom
+------------------------------------------------------------------------- */
+
+void Modify::thermo_energy_atom(int nlocal, double *energy)
+{
+  int i,j;
+  double *eatom;
+
+  for (i = 0; i < n_thermo_energy_atom; i++) {
+    eatom = fix[list_thermo_energy_atom[i]]->eatom;
+    if (!eatom) continue;
+    for (j = 0; j < nlocal; j++) energy[j] += eatom[j];
+  }
 }
 
 /* ----------------------------------------------------------------------
@@ -685,8 +718,8 @@ void Modify::add_fix(int narg, char **arg, int trysuffix)
   //   since some fixes access domain settings in their constructor
   // MUST change NEXCEPT above when add new fix to this list
 
-  const char *exceptions[NEXCEPT] = 
-    {"GPU","OMP","INTEL","property/atom","cmap"};
+  const char *exceptions[NEXCEPT] =
+    {"GPU","OMP","INTEL","property/atom","cmap","cmap3","rx"};
 
   if (domain->box_exist == 0) {
     int m;
@@ -720,7 +753,7 @@ void Modify::add_fix(int narg, char **arg, int trysuffix)
 
   if (ifix < nfix) {
     newflag = 0;
-    
+
     int match = 0;
     if (strcmp(arg[2],fix[ifix]->style) == 0) match = 1;
     if (!match && trysuffix && lmp->suffix_enable) {
@@ -789,8 +822,8 @@ void Modify::add_fix(int narg, char **arg, int trysuffix)
         strcmp(style_restart_global[i],fix[ifix]->style) == 0) {
       fix[ifix]->restart(state_restart_global[i]);
       if (comm->me == 0) {
-        char *str = (char *) ("Resetting global state of Fix %s Style %s "
-                              "from restart file info\n");
+        const char *str = (const char *) ("Resetting global state of Fix %s "
+                                          "Style %s from restart file info\n");
         if (screen) fprintf(screen,str,fix[ifix]->id,fix[ifix]->style);
         if (logfile) fprintf(logfile,str,fix[ifix]->id,fix[ifix]->style);
       }
@@ -815,7 +848,7 @@ void Modify::add_fix(int narg, char **arg, int trysuffix)
 
   // increment nfix (if new)
   // set fix mask values
-  // post_construct() allows new fix to create other fixes
+  // post_constructor() allows new fix to create other fixes
   // nfix increment comes first so that recursive call to add_fix within
   //   post_constructor() will see updated nfix
 
@@ -944,7 +977,7 @@ void Modify::add_compute(int narg, char **arg, int trysuffix)
     }
   }
 
-  if (compute[ncompute] == NULL && 
+  if (compute[ncompute] == NULL &&
       compute_map->find(arg[2]) != compute_map->end()) {
     ComputeCreator compute_creator = (*compute_map)[arg[2]];
     compute[ncompute] = compute_creator(lmp,narg,arg);
@@ -978,7 +1011,7 @@ void Modify::modify_compute(int narg, char **arg)
   int icompute;
   for (icompute = 0; icompute < ncompute; icompute++)
     if (strcmp(arg[0],compute[icompute]->id) == 0) break;
-  if (icompute == ncompute) 
+  if (icompute == ncompute)
     error->all(FLERR,"Could not find compute_modify ID");
 
   compute[icompute]->modify_params(narg-1,&arg[1]);
@@ -1264,7 +1297,7 @@ void Modify::list_init_end_of_step(int mask, int &n, int *&list)
 
 /* ----------------------------------------------------------------------
    create list of fix indices for thermo energy fixes
-   only added to list if fix has THERMO_ENERGY mask
+   only added to list if fix has THERMO_ENERGY mask set,
    and its thermo_energy flag was set via fix_modify
 ------------------------------------------------------------------------- */
 
@@ -1280,6 +1313,26 @@ void Modify::list_init_thermo_energy(int mask, int &n, int *&list)
   n = 0;
   for (int i = 0; i < nfix; i++)
     if (fmask[i] & mask && fix[i]->thermo_energy) list[n++] = i;
+}
+
+/* ----------------------------------------------------------------------
+   create list of fix indices for peratom thermo energy fixes
+   only added to list if fix has its peatom_flag set,
+   and its thermo_energy flag was set via fix_modify
+------------------------------------------------------------------------- */
+
+void Modify::list_init_thermo_energy_atom(int &n, int *&list)
+{
+  delete [] list;
+
+  n = 0;
+  for (int i = 0; i < nfix; i++)
+    if (fix[i]->peatom_flag && fix[i]->thermo_energy) n++;
+  list = new int[n];
+
+  n = 0;
+  for (int i = 0; i < nfix; i++)
+    if (fix[i]->peatom_flag && fix[i]->thermo_energy) list[n++] = i;
 }
 
 /* ----------------------------------------------------------------------

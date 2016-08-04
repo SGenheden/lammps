@@ -11,7 +11,7 @@
    See the README file in the top-level LAMMPS directory.
 ------------------------------------------------------------------------- */
 
-#include "string.h"
+#include <string.h>
 #include "compute_ke_atom.h"
 #include "atom.h"
 #include "update.h"
@@ -63,7 +63,7 @@ void ComputeKEAtom::compute_peratom()
 
   // grow ke array if necessary
 
-  if (atom->nlocal > nmax) {
+  if (atom->nmax > nmax) {
     memory->destroy(ke);
     nmax = atom->nmax;
     memory->create(ke,nmax,"ke/atom:ke");

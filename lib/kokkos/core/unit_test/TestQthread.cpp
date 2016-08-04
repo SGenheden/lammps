@@ -54,6 +54,7 @@
 #include <TestAtomic.hpp>
 
 #include <TestViewAPI.hpp>
+#include <TestViewOfClass.hpp>
 
 #include <TestTeam.hpp>
 #include <TestRange.hpp>
@@ -99,17 +100,22 @@ TEST_F( qthread, view_api) {
   TestViewAPI< double , Kokkos::Qthread >();
 }
 
+TEST_F( qthread , view_nested_view )
+{
+  ::Test::view_nested_view< Kokkos::Qthread >();
+}
+
 TEST_F( qthread , range_tag )
 {
-  TestRange< Kokkos::Qthread >::test_for(1000);
-  TestRange< Kokkos::Qthread >::test_reduce(1000);
-  TestRange< Kokkos::Qthread >::test_scan(1000);
+  TestRange< Kokkos::Qthread , Kokkos::Schedule<Kokkos::Static> >::test_for(1000);
+  TestRange< Kokkos::Qthread , Kokkos::Schedule<Kokkos::Static> >::test_reduce(1000);
+  TestRange< Kokkos::Qthread , Kokkos::Schedule<Kokkos::Static> >::test_scan(1000);
 }
 
 TEST_F( qthread , team_tag )
 {
-  TestTeamPolicy< Kokkos::Qthread >::test_for( 1000 );
-  TestTeamPolicy< Kokkos::Qthread >::test_reduce( 1000 );
+  TestTeamPolicy< Kokkos::Qthread , Kokkos::Schedule<Kokkos::Static> >::test_for( 1000 );
+  TestTeamPolicy< Kokkos::Qthread , Kokkos::Schedule<Kokkos::Static> >::test_reduce( 1000 );
 }
 
 TEST_F( qthread, long_reduce) {
@@ -133,11 +139,11 @@ TEST_F( qthread, long_reduce_dynamic_view ) {
 }
 
 TEST_F( qthread, team_long_reduce) {
-  TestReduceTeam< long ,   Kokkos::Qthread >( 1000000 );
+  TestReduceTeam< long ,   Kokkos::Qthread , Kokkos::Schedule<Kokkos::Static> >( 1000000 );
 }
 
 TEST_F( qthread, team_double_reduce) {
-  TestReduceTeam< double ,   Kokkos::Qthread >( 1000000 );
+  TestReduceTeam< double ,   Kokkos::Qthread , Kokkos::Schedule<Kokkos::Static> >( 1000000 );
 }
 
 
@@ -240,16 +246,16 @@ TEST_F( qthread , scan )
 }
 
 TEST_F( qthread, team_shared ) {
-  TestSharedTeam< Kokkos::Qthread >();
+  TestSharedTeam< Kokkos::Qthread , Kokkos::Schedule<Kokkos::Static> >();
 }
 
 TEST_F( qthread , team_scan )
 {
-  TestScanTeam< Kokkos::Qthread >( 10 );
-  TestScanTeam< Kokkos::Qthread >( 10000 );
+  TestScanTeam< Kokkos::Qthread , Kokkos::Schedule<Kokkos::Static> >( 10 );
+  TestScanTeam< Kokkos::Qthread , Kokkos::Schedule<Kokkos::Static> >( 10000 );
 }
 
-#if defined (KOKKOS_HAVE_CXX11) && 0 /* disable */
+#if 0 /* disable */
 TEST_F( qthread , team_vector )
 {
   ASSERT_TRUE( ( TestTeamVector::Test< Kokkos::Qthread >(0) ) );
@@ -269,13 +275,10 @@ TEST_F( qthread , task_policy )
   for ( long i = 0 ; i < 35 ; ++i ) TestTaskPolicy::test_fib2< Kokkos::Qthread >(i);
 }
 
-#if defined( KOKKOS_HAVE_CXX11 )
 TEST_F( qthread , task_team )
 {
-  std::cout << "qthread.task_team test disabled due to unresolved error causing the test to hang." << std::endl ;
-  // TestTaskPolicy::test_task_team< Kokkos::Qthread >(1000);
+  TestTaskPolicy::test_task_team< Kokkos::Qthread >(1000);
 }
-#endif
 
 //----------------------------------------------------------------------------
 

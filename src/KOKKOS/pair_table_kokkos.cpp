@@ -15,10 +15,10 @@
    Contributing author: Paul Crozier (SNL)
 ------------------------------------------------------------------------- */
 
-#include "mpi.h"
-#include "math.h"
-#include "stdlib.h"
-#include "string.h"
+#include <mpi.h>
+#include <math.h>
+#include <stdlib.h>
+#include <string.h>
 #include "pair_table_kokkos.h"
 #include "kokkos.h"
 #include "atom.h"
@@ -192,7 +192,6 @@ void PairTableKokkos<DeviceType>::compute_style(int eflag_in, int vflag_in)
       else Kokkos::parallel_for(config,f);
     }
   }
-  DeviceType::fence();
 
   if (eflag) eng_vdwl += ev.evdwl;
   if (vflag_global) {
@@ -368,7 +367,7 @@ void PairTableKokkos<DeviceType>::create_kokkos_tables()
       h_table->f2(i,j) = tb->f2[j];
   }
 
-  
+
   Kokkos::deep_copy(d_table->nshiftbits,h_table->nshiftbits);
   Kokkos::deep_copy(d_table->nmask,h_table->nmask);
   Kokkos::deep_copy(d_table->innersq,h_table->innersq);
@@ -465,12 +464,12 @@ void PairTableKokkos<DeviceType>::settings(int narg, char **arg)
 
   if (allocated) {
     memory->destroy(setflag);
-    
+
     d_table_const.tabindex = d_table->tabindex = typename ArrayTypes<DeviceType>::t_int_2d();
     h_table->tabindex = typename ArrayTypes<LMPHostType>::t_int_2d();
 
-    d_table_const.cutsq = d_table->cutsq = typename ArrayTypes<DeviceType>::t_ffloat_2d();  
-    h_table->cutsq = typename ArrayTypes<LMPHostType>::t_ffloat_2d();  
+    d_table_const.cutsq = d_table->cutsq = typename ArrayTypes<DeviceType>::t_ffloat_2d();
+    h_table->cutsq = typename ArrayTypes<LMPHostType>::t_ffloat_2d();
   }
   allocated = 0;
 
@@ -1375,8 +1374,11 @@ void PairTableKokkos<DeviceType>::cleanup_copy() {
   h_table=NULL; d_table=NULL;
 }
 
+namespace LAMMPS_NS {
 template class PairTableKokkos<LMPDeviceType>;
 #ifdef KOKKOS_HAVE_CUDA
 template class PairTableKokkos<LMPHostType>;
 #endif
+
+}
 

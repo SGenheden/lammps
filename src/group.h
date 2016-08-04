@@ -14,7 +14,7 @@
 #ifndef LMP_GROUP_H
 #define LMP_GROUP_H
 
-#include "stdio.h"
+#include <stdio.h>
 #include "pointers.h"
 #include <map>
 
@@ -135,6 +135,10 @@ given by MAX_GROUP in group.cpp and is 32.
 E: Group region ID does not exist
 
 A region ID used in the group command does not exist.
+
+E: Illegal range increment value
+
+The increment must be >= 1.
 
 E: Variable name for group does not exist
 

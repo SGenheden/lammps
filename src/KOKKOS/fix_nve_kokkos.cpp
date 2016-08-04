@@ -11,8 +11,8 @@
    See the README file in the top-level LAMMPS directory.
 ------------------------------------------------------------------------- */
 
-#include "stdio.h"
-#include "string.h"
+#include <stdio.h>
+#include <string.h>
 #include "fix_nve_kokkos.h"
 #include "atom_masks.h"
 #include "atom_kokkos.h"
@@ -171,7 +171,10 @@ void FixNVEKokkos<DeviceType>::cleanup_copy()
   vatom = NULL;
 }
 
+namespace LAMMPS_NS {
 template class FixNVEKokkos<LMPDeviceType>;
 #ifdef KOKKOS_HAVE_CUDA
 template class FixNVEKokkos<LMPHostType>;
 #endif
+}
+

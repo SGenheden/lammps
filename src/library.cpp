@@ -14,11 +14,12 @@
 // C or Fortran style library interface to LAMMPS
 // customize by adding new LAMMPS-specific functions
 
-#include "mpi.h"
-#include "string.h"
-#include "stdlib.h"
+#include <mpi.h>
+#include <string.h>
+#include <stdlib.h>
 #include "library.h"
 #include "lammps.h"
+#include "universe.h"
 #include "input.h"
 #include "atom.h"
 #include "domain.h"
@@ -27,6 +28,8 @@
 #include "input.h"
 #include "variable.h"
 #include "modify.h"
+#include "output.h"
+#include "thermo.h"
 #include "compute.h"
 #include "fix.h"
 #include "comm.h"
@@ -77,6 +80,16 @@ void lammps_close(void *ptr)
 {
   LAMMPS *lmp = (LAMMPS *) ptr;
   delete lmp;
+}
+
+/* ----------------------------------------------------------------------
+   get the numerical representation of the current LAMMPS version
+------------------------------------------------------------------------- */
+
+int lammps_version(void *ptr)
+{
+  LAMMPS *lmp = (LAMMPS *) ptr;
+  return atoi(lmp->universe->num_ver);
 }
 
 /* ----------------------------------------------------------------------
@@ -138,7 +151,20 @@ void *lammps_extract_global(void *ptr, char *name)
   if (strcmp(name,"xz") == 0) return (void *) &lmp->domain->xz;
   if (strcmp(name,"yz") == 0) return (void *) &lmp->domain->yz;
   if (strcmp(name,"natoms") == 0) return (void *) &lmp->atom->natoms;
+  if (strcmp(name,"nbonds") == 0) return (void *) &lmp->atom->nbonds;
+  if (strcmp(name,"nangles") == 0) return (void *) &lmp->atom->nangles;
+  if (strcmp(name,"ndihedrals") == 0) return (void *) &lmp->atom->ndihedrals;
+  if (strcmp(name,"nimpropers") == 0) return (void *) &lmp->atom->nimpropers;
   if (strcmp(name,"nlocal") == 0) return (void *) &lmp->atom->nlocal;
+  if (strcmp(name,"ntimestep") == 0) return (void *) &lmp->update->ntimestep;
+
+  // NOTE: we cannot give access to the thermo "time" data by reference,
+  // as that is a recomputed property.  Only "atime" can be provided as pointer.
+  // please use lammps_get_thermo() defined below to access all supported
+  // thermo keywords by value.
+
+  if (strcmp(name,"atime") == 0) return (void *) &lmp->update->atime;
+
   return NULL;
 }
 
@@ -371,6 +397,23 @@ int lammps_set_variable(void *ptr, char *name, char *str)
 }
 
 /* ----------------------------------------------------------------------
+   return the current value of a thermo keyword as double.
+   unlike lammps_extract_global() this does not give access to the
+   storage of the data in question, and thus needs to be called
+   again to retrieve an updated value. The upshot is that it allows
+   accessing information that is only computed on-the-fly.
+------------------------------------------------------------------------- */
+
+double lammps_get_thermo(void *ptr, char *name)
+{
+  LAMMPS *lmp = (LAMMPS *) ptr;
+  double dval;
+
+  lmp->output->thermo->evaluate_keyword(name,&dval);
+  return dval;
+}
+
+/* ----------------------------------------------------------------------
    return the total number of atoms in the system
    useful before call to lammps_get_atoms() so can pre-allocate vector
 ------------------------------------------------------------------------- */
@@ -394,7 +437,7 @@ int lammps_get_natoms(void *ptr)
    data must be pre-allocated by caller to correct length
 ------------------------------------------------------------------------- */
 
-void lammps_gather_atoms(void *ptr, char *name, 
+void lammps_gather_atoms(void *ptr, char *name,
                          int type, int count, void *data)
 {
   LAMMPS *lmp = (LAMMPS *) ptr;
@@ -404,8 +447,9 @@ void lammps_gather_atoms(void *ptr, char *name,
   int flag = 0;
   if (lmp->atom->tag_enable == 0 || lmp->atom->tag_consecutive() == 0) flag = 1;
   if (lmp->atom->natoms > MAXSMALLINT) flag = 1;
-  if (flag && lmp->comm->me == 0) {
-    lmp->error->warning(FLERR,"Library error in lammps_gather_atoms");
+  if (flag) {
+    if (lmp->comm->me == 0)
+      lmp->error->warning(FLERR,"Library error in lammps_gather_atoms");
     return;
   }
 
@@ -493,8 +537,9 @@ void lammps_scatter_atoms(void *ptr, char *name,
   if (lmp->atom->tag_enable == 0 || lmp->atom->tag_consecutive() == 0) flag = 1;
   if (lmp->atom->natoms > MAXSMALLINT) flag = 1;
   if (lmp->atom->map_style == 0) flag = 1;
-  if (flag && lmp->comm->me == 0) {
-    lmp->error->warning(FLERR,"Library error in lammps_scatter_atoms");
+  if (flag) {
+    if (lmp->comm->me == 0)
+      lmp->error->warning(FLERR,"Library error in lammps_scatter_atoms");
     return;
   }
 

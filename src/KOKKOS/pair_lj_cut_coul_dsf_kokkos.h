@@ -97,7 +97,7 @@ class PairLJCutCoulDSFKokkos : public PairLJCutCoulDSF {
   typename ArrayTypes<DeviceType>::tdual_ffloat_2d k_cut_coulsq;
   typename ArrayTypes<DeviceType>::t_ffloat_2d d_cut_coulsq;
 
-  
+
   int neighflag;
   int nlocal,nall,eflag,vflag;
 
@@ -126,5 +126,13 @@ class PairLJCutCoulDSFKokkos : public PairLJCutCoulDSF {
 #endif
 
 /* ERROR/WARNING messages:
+
+E: Cannot use Kokkos pair style with rRESPA inner/middle
+
+Self-explanatory.
+
+E: Cannot use chosen neighbor list style with lj/cut/coul/cut/kk
+
+That style is not supported by Kokkos.
 
 */

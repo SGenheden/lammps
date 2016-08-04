@@ -88,7 +88,7 @@ class PairLJSDKKokkos : public PairLJSDK {
   typename ArrayTypes<DeviceType>::tdual_ffloat_2d k_cutsq;
   typename ArrayTypes<DeviceType>::t_ffloat_2d d_cutsq;
 
-  
+
   int neighflag;
   int nlocal,nall,eflag,vflag;
 
@@ -127,7 +127,7 @@ command-line option when running LAMMPS to see the offending line.
 
 E: Cannot use Kokkos pair style with rRESPA inner/middle
 
-rRESPA inner/middle options are not yet supported by Kokkos.
+Self-explanatory.
 
 E: Cannot use chosen neighbor list style with lj/sdk/kk
 

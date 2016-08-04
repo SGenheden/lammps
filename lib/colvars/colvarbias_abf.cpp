@@ -1,16 +1,27 @@
-/// -*- c++ -*-
+// -*- c++ -*-
 
 #include "colvarmodule.h"
 #include "colvar.h"
 #include "colvarbias_abf.h"
 
-/// ABF bias constructor; parses the config file
 
-colvarbias_abf::colvarbias_abf(std::string const &conf, char const *key)
-  : colvarbias(conf, key),
+colvarbias_abf::colvarbias_abf(char const *key)
+  : colvarbias(key),
+    force(NULL),
     gradients(NULL),
-    samples(NULL)
+    samples(NULL),
+    last_gradients(NULL),
+    last_samples(NULL)
 {
+}
+
+
+int colvarbias_abf::init(std::string const &conf)
+{
+  colvarbias::init(conf);
+
+  provide(f_cvb_history_dependent);
+
   // TODO relax this in case of VMD plugin
   if (cvm::temperature() == 0.0)
     cvm::log("WARNING: ABF should not be run without a thermostat or at 0 Kelvin!\n");
@@ -18,10 +29,18 @@ colvarbias_abf::colvarbias_abf(std::string const &conf, char const *key)
   // ************* parsing general ABF options ***********************
 
   get_keyval(conf, "applyBias",  apply_bias, true);
-  if (!apply_bias) cvm::log("WARNING: ABF biases will *not* be applied!\n");
+  if (apply_bias) {
+    enable(f_cvb_apply_force);
+  } else {
+    cvm::log("WARNING: ABF biases will *not* be applied!\n");
+  }
 
   get_keyval(conf, "updateBias",  update_bias, true);
-  if (!update_bias) cvm::log("WARNING: ABF biases will *not* be updated!\n");
+  if (update_bias) {
+    enable(f_cvb_history_dependent);
+  } else {
+    cvm::log("WARNING: ABF biases will *not* be updated!\n");
+  }
 
   get_keyval(conf, "hideJacobian", hide_Jacobian, false);
   if (hide_Jacobian) {
@@ -35,7 +54,7 @@ colvarbias_abf::colvarbias_abf(std::string const &conf, char const *key)
   min_samples = full_samples / 2;
   // full_samples - min_samples >= 1 is guaranteed
 
-  get_keyval(conf, "inputPrefix",  input_prefix, std::vector<std::string> ());
+  get_keyval(conf, "inputPrefix",  input_prefix, std::vector<std::string>());
   get_keyval(conf, "outputFreq", output_freq, cvm::restart_out_freq);
   get_keyval(conf, "historyFreq", history_freq, 0);
   b_history_files = (history_freq > 0);
@@ -58,37 +77,22 @@ colvarbias_abf::colvarbias_abf(std::string const &conf, char const *key)
     cvm::error("Error: no collective variables specified for the ABF bias.\n");
   }
 
+  if (update_bias) {
+  // Request calculation of system force (which also checks for availability)
+    if(enable(f_cvb_get_system_force)) return cvm::get_error();
+  }
+  if (apply_bias) {
+    if(enable(f_cvb_apply_force)) return cvm::get_error();
+  }
+
   for (size_t i = 0; i < colvars.size(); i++) {
 
     if (colvars[i]->value().type() != colvarvalue::type_scalar) {
       cvm::error("Error: ABF bias can only use scalar-type variables.\n");
     }
-
-    colvars[i]->enable(colvar::task_gradients);
-
-    if (update_bias) {
-      // Request calculation of system force (which also checks for availability)
-      colvars[i]->enable(colvar::task_system_force);
-
-      if (!colvars[i]->tasks[colvar::task_extended_lagrangian]) {
-        // request computation of Jacobian force
-        // ultimately, will be done regardless of extended Lagrangian
-        // and colvar should then just report zero Jacobian force
-        colvars[i]->enable(colvar::task_Jacobian_force);
-
-        // request Jacobian force as part as system force
-        // except if the user explicitly requires the "silent" Jacobian
-        // correction AND the colvar has a single component
-        if (hide_Jacobian) {
-          if (colvars[i]->n_components() > 1) {
-            cvm::log("WARNING: colvar \"" + colvars[i]->name
-            + "\" has multiple components; reporting its Jacobian forces\n");
-            colvars[i]->enable(colvar::task_report_Jacobian_force);
-          }
-        } else {
-          colvars[i]->enable(colvar::task_report_Jacobian_force);
-        }
-      }
+    colvars[i]->enable(f_cv_grid);
+    if (hide_Jacobian) {
+      colvars[i]->enable(f_cv_hide_Jacobian);
     }
 
     // Here we could check for orthogonality of the Cartesian coordinates
@@ -138,6 +142,8 @@ colvarbias_abf::colvarbias_abf(std::string const &conf, char const *key)
   }
 
   cvm::log("Finished ABF setup.\n");
+
+  return COLVARS_OK;
 }
 
 /// Destructor
@@ -166,7 +172,10 @@ colvarbias_abf::~colvarbias_abf()
     last_gradients = NULL;
   }
 
-  delete [] force;
+  if (force) {
+    delete [] force;
+    force = NULL;
+  }
 
   if (cvm::n_abf_biases > 0)
     cvm::n_abf_biases -= 1;
@@ -176,7 +185,7 @@ colvarbias_abf::~colvarbias_abf()
 /// Update the FE gradient, compute and apply biasing force
 /// also output data to disk if needed
 
-cvm::real colvarbias_abf::update()
+int colvarbias_abf::update()
 {
   if (cvm::debug()) cvm::log("Updating ABF bias " + this->name);
 
@@ -283,8 +292,9 @@ cvm::real colvarbias_abf::update()
     cvm::log("Prepared sample and gradient buffers at step "+cvm::to_str(cvm::step_absolute())+".");
   }
 
-  return 0.0;
+  return COLVARS_OK;
 }
+
 
 int colvarbias_abf::replica_share() {
   int p;

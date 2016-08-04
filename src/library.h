@@ -16,7 +16,7 @@
    new LAMMPS-specific functions can be added
 */
 
-#include "mpi.h"
+#include <mpi.h>
 
 /* ifdefs allow this file to be included in a C program */
 
@@ -27,6 +27,7 @@ extern "C" {
 void lammps_open(int, char **, MPI_Comm, void **);
 void lammps_open_no_mpi(int, char **, void **);
 void lammps_close(void *);
+int  lammps_version(void *);
 void lammps_file(void *, char *);
 char *lammps_command(void *, char *);
 void lammps_free(void *);
@@ -38,7 +39,9 @@ void *lammps_extract_fix(void *, char *, int, int, int, int);
 void *lammps_extract_variable(void *, char *, char *);
 
 int lammps_set_variable(void *, char *, char *);
+double lammps_get_thermo(void *, char *);
 int lammps_get_natoms(void *);
+
 void lammps_gather_atoms(void *, char *, int, int, void *);
 void lammps_scatter_atoms(void *, char *, int, int, void *);
 

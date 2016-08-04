@@ -11,7 +11,7 @@
    See the README file in the top-level LAMMPS directory.
 ------------------------------------------------------------------------- */
 
-#include "math.h"
+#include <math.h>
 #include "dihedral.h"
 #include "atom.h"
 #include "comm.h"
@@ -67,7 +67,7 @@ Dihedral::~Dihedral()
 
 void Dihedral::init()
 {
-  if (!allocated && atom->ndihedraltypes) 
+  if (!allocated && atom->ndihedraltypes)
     error->all(FLERR,"Dihedral coeffs are not set");
   for (int i = 1; i <= atom->ndihedraltypes; i++)
     if (setflag[i] == 0) error->all(FLERR,"All dihedral coeffs are not set");
@@ -98,12 +98,12 @@ void Dihedral::ev_setup(int eflag, int vflag)
   if (eflag_atom && atom->nmax > maxeatom) {
     maxeatom = atom->nmax;
     memory->destroy(eatom);
-    memory->create(eatom,comm->nthreads*maxeatom,"bond:eatom");
+    memory->create(eatom,comm->nthreads*maxeatom,"dihedral:eatom");
   }
   if (vflag_atom && atom->nmax > maxvatom) {
     maxvatom = atom->nmax;
     memory->destroy(vatom);
-    memory->create(vatom,comm->nthreads*maxvatom,6,"bond:vatom");
+    memory->create(vatom,comm->nthreads*maxvatom,6,"dihedral:vatom");
   }
 
   // zero accumulators

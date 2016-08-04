@@ -11,10 +11,10 @@
    See the README file in the top-level LAMMPS directory.
 ------------------------------------------------------------------------- */
 
-#include "math.h"
-#include "stdlib.h"
-#include "string.h"
-#include "ctype.h"
+#include <math.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
 #include "pair_hybrid.h"
 #include "atom.h"
 #include "force.h"
@@ -42,6 +42,9 @@ PairHybrid::PairHybrid(LAMMPS *lmp) : Pair(lmp)
 
   outerflag = 0;
   respaflag = 0;
+
+  if (lmp->kokkos)
+    error->all(FLERR,"Cannot yet use pair hybrid with Kokkos");
 }
 
 /* ---------------------------------------------------------------------- */
@@ -114,6 +117,7 @@ void PairHybrid::compute(int eflag, int vflag)
   // check if we are running with r-RESPA using the hybrid keyword
 
   Respa *respa = NULL;
+  respaflag = 0;
   if (strstr(update->integrate_style,"respa")) {
     respa = (Respa *) update->integrate;
     if (respa->nhybrid_styles > 0) respaflag = 1;
@@ -129,7 +133,7 @@ void PairHybrid::compute(int eflag, int vflag)
       // outerflag is set and sub-style has a compute_outer() method
 
       if (styles[m]->compute_flag == 0) continue;
-      if (outerflag && styles[m]->respa_enable) 
+      if (outerflag && styles[m]->respa_enable)
         styles[m]->compute_outer(eflag,vflag_substyle);
       else styles[m]->compute(eflag,vflag_substyle);
     }
@@ -317,7 +321,7 @@ void PairHybrid::flags()
   // manybody_flag = 1 if any sub-style is set
   // no_virial_fdotr_compute = 1 if any sub-style is set
   // ghostneigh = 1 if any sub-style is set
-  // ewaldflag, pppmflag, msmflag, dispersionflag, tip4pflag = 1
+  // ewaldflag, pppmflag, msmflag, dipoleflag, dispersionflag, tip4pflag = 1
   //   if any sub-style is set
   // compute_flag = 1 if any sub-style is set
 
@@ -332,6 +336,7 @@ void PairHybrid::flags()
     if (styles[m]->ewaldflag) ewaldflag = 1;
     if (styles[m]->pppmflag) pppmflag = 1;
     if (styles[m]->msmflag) msmflag = 1;
+    if (styles[m]->dipoleflag) dipoleflag = 1;
     if (styles[m]->dispersionflag) dispersionflag = 1;
     if (styles[m]->tip4pflag) tip4pflag = 1;
     if (styles[m]->compute_flag) compute_flag = 1;
@@ -466,8 +471,8 @@ void PairHybrid::init_style()
       for (i = 1; i < 4; ++i) {
         if (((force->special_lj[i] == 0.0) || (force->special_lj[i] == 1.0))
             && (force->special_lj[i] != special_lj[istyle][i]))
-          error->all(FLERR,"Pair_modify special setting incompatible with"
-                     " global special_bonds setting");
+          error->all(FLERR,"Pair_modify special setting for pair hybrid "
+		     "incompatible with global special_bonds setting");
       }
     }
 
@@ -476,8 +481,8 @@ void PairHybrid::init_style()
         if (((force->special_coul[i] == 0.0)
              || (force->special_coul[i] == 1.0))
             && (force->special_coul[i] != special_coul[istyle][i]))
-          error->all(FLERR,"Pair_modify special setting incompatible with"
-                     "global special_bonds setting");
+          error->all(FLERR,"Pair_modify special setting for pair hybrid "
+		     "incompatible with global special_bonds setting");
       }
     }
   }
@@ -486,7 +491,7 @@ void PairHybrid::init_style()
 
   for (istyle = 0; istyle < nstyles; istyle++) styles[istyle]->init_style();
 
-  // create skip lists for each pair neigh request
+  // create skip lists inside each pair neigh request
   // any kind of list can have its skip flag set at this stage
 
   for (i = 0; i < neighbor->nrequest; i++) {
@@ -534,6 +539,7 @@ void PairHybrid::init_style()
     // if any skipping occurs
     // set request->skip and copy iskip and ijskip into request
     // else delete iskip and ijskip
+    // no skipping if pair style assigned to all type pairs
 
     skip = 0;
     for (itype = 1; itype <= ntypes; itype++)
@@ -604,7 +610,17 @@ double PairHybrid::init_one(int i, int j)
 }
 
 /* ----------------------------------------------------------------------
-   combine sub-style neigh list requests and create new ones if needed
+   invoke setup for each sub-style
+------------------------------------------------------------------------- */
+
+void PairHybrid::setup()
+{
+  for (int m = 0; m < nstyles; m++) styles[m]->setup();
+}
+
+/* ----------------------------------------------------------------------
+   examine sub-style neigh list requests
+   create new parent requests if needed, to derive sub-style requests from
 ------------------------------------------------------------------------- */
 
 void PairHybrid::modify_requests()
@@ -612,28 +628,36 @@ void PairHybrid::modify_requests()
   int i,j;
   NeighRequest *irq,*jrq;
 
-  // loop over pair requests only
-  // if list is skip list and not copy, look for non-skip list of same kind
-  // if one exists, point at that one via otherlist
-  // else make new non-skip request of same kind and point at that one
-  //   don't bother to set ID for new request, since pair hybrid ignores list
-  // only exception is half_from_full:
-  //   ignore it, turn off skip, since it will derive from its skip parent
-  // after possible new request creation, unset skip flag and otherlist
-  //   for these derived lists: granhistory, rRESPA inner/middle
-  //   this prevents neighbor from treating them as skip lists
-  // copy list check is for pair style = hybrid/overlay
-  //   which invokes this routine
+  // loop over pair requests only, including those added during looping
+
+  int nrequest_original = neighbor->nrequest;
 
   for (i = 0; i < neighbor->nrequest; i++) {
     if (!neighbor->requests[i]->pair) continue;
 
+    // nothing more to do if this request:
+    //   is not a skip list
+    //   is a copy or half_from_full or granhistory list
+    // copy list setup is from pair style = hybrid/overlay
+    //   which invokes this method at end of its modify_requests()
+    // if granhistory, turn off skip, since each gran sub-style
+    //   its own history list, parent gran list does not have history
+    // if half_from_full, turn off skip, since it will derive 
+    //   from its full parent and its skip status
+
     irq = neighbor->requests[i];
-    if (irq->skip == 0 || irq->copy) continue;
-    if (irq->half_from_full) {
+    if (irq->skip == 0) continue;
+    if (irq->copy) continue;
+    if (irq->granhistory || irq->half_from_full) {
       irq->skip = 0;
       continue;
     }
+
+    // look for another list that matches via same_kind() and is not a skip list
+    // if one exists, point at that one via otherlist
+    // else make new parent request via copy_request() and point at that one
+    //   new parent list is not a skip list
+    //   parent does not need its ID set, since pair hybrid does not use it
 
     for (j = 0; j < neighbor->nrequest; j++) {
       if (!neighbor->requests[j]->pair) continue;
@@ -648,9 +672,52 @@ void PairHybrid::modify_requests()
       irq->otherlist = newrequest;
     }
 
-    if (irq->granhistory || irq->respainner || irq->respamiddle) {
+    // for rRESPA inner/middle lists,
+    //   which just created or set otherlist to parent:
+    // unset skip flag and otherlist
+    //   this prevents neighbor from treating them as skip lists
+
+    if (irq->respainner || irq->respamiddle) {
       irq->skip = 0;
       irq->otherlist = -1;
+    }
+  }
+
+  // adjustments to newly added granular parent requests (gran = 1)
+  // set parent newton = 2 if has children with granonesided = 0 and 1
+  //   else newton = 0 = setting of children
+  //   if 2, also set child off2on for both granonesided kinds of children
+  // set parent gran onesided = 0 if has children with granonesided = 0 and 1
+  //   else onesided = setting of children
+
+  for (i = nrequest_original; i < neighbor->nrequest; i++) {
+    if (!neighbor->requests[i]->pair) continue;
+    if (!neighbor->requests[i]->gran) continue;
+    irq = neighbor->requests[i];
+
+    int onesided = -1;
+    for (j = 0; j < nrequest_original; j++) {
+      if (!neighbor->requests[j]->pair) continue;
+      if (!neighbor->requests[j]->gran) continue;
+      if (neighbor->requests[j]->otherlist != i) continue;
+      jrq = neighbor->requests[j];
+      
+      if (onesided < 0) onesided = jrq->granonesided;
+      else if (onesided != jrq->granonesided) onesided = 2;
+      if (onesided == 2) break;
+    }
+
+    if (onesided == 2) {
+      irq->newton = 2;
+      irq->granonesided = 0;
+
+      for (j = 0; j < nrequest_original; j++) {
+        if (!neighbor->requests[j]->pair) continue;
+        if (!neighbor->requests[j]->gran) continue;
+        if (neighbor->requests[j]->otherlist != i) continue;
+        jrq = neighbor->requests[j];
+        jrq->off2on = 1;
+      }
     }
   }
 }
@@ -811,7 +878,7 @@ void PairHybrid::modify_params(int narg, char **arg)
       int multiflag = force->inumeric(FLERR,arg[2]);
       for (m = 0; m < nstyles; m++)
         if (strcmp(arg[1],keywords[m]) == 0 && multiflag == multiple[m]) break;
-      if (m == nstyles) 
+      if (m == nstyles)
         error->all(FLERR,"Unknown pair_modify hybrid sub-style");
       iarg = 3;
     }

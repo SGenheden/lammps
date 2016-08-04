@@ -16,8 +16,8 @@
                          Samuel Genheden (University of Southampton)
 ------------------------------------------------------------------------- */
 
-#include "math.h"
-#include "stdlib.h"
+#include <math.h>
+#include <stdlib.h>
 #include "pair_lj_sf_dipole_sf.h"
 #include "atom.h"
 #include "neighbor.h"
@@ -27,7 +27,7 @@
 #include "memory.h"
 #include "error.h"
 #include "update.h"
-#include "string.h"
+#include <string.h>
 
 using namespace LAMMPS_NS;
 
@@ -135,8 +135,9 @@ void PairLJSFDipoleSF::compute(int eflag, int vflag)
 
         if (rsq < cut_coulsq[itype][jtype]) {
 
+          rcutcoul2inv=1.0/cut_coulsq[itype][jtype];
           if (qtmp != 0.0 && q[j] != 0.0) {
-            pre1 = qtmp*q[j]*rinv*(r2inv-1.0/cut_coulsq[itype][jtype]);
+            pre1 = qtmp*q[j]*rinv*(r2inv-rcutcoul2inv);
 
             forcecoulx += pre1*delx;
             forcecouly += pre1*dely;
@@ -146,7 +147,6 @@ void PairLJSFDipoleSF::compute(int eflag, int vflag)
           if (mu[i][3] > 0.0 && mu[j][3] > 0.0) {
             r3inv = r2inv*rinv;
             r5inv = r3inv*r2inv;
-            rcutcoul2inv=1.0/cut_coulsq[itype][jtype];
 
             pdotp = mu[i][0]*mu[j][0] + mu[i][1]*mu[j][1] + mu[i][2]*mu[j][2];
             pidotr = mu[i][0]*delx + mu[i][1]*dely + mu[i][2]*delz;
@@ -158,7 +158,7 @@ void PairLJSFDipoleSF::compute(int eflag, int vflag)
             aforcecouly = pre1*dely;
             aforcecoulz = pre1*delz;
 
-            bfac = 1.0 - 4.0*rsq*sqrt(rsq)*rcutcoul2inv*sqrt(rcutcoul2inv) +
+            bfac = 1.0 - 4.0*rsq*sqrt(rsq*rcutcoul2inv)*rcutcoul2inv +
               3.0*rsq*rsq*rcutcoul2inv*rcutcoul2inv;
             presf = 2.0 * r2inv * pidotr * pjdotr;
             bforcecoulx = bfac * (pjdotr*mu[i][0]+pidotr*mu[j][0]-presf*delx);
@@ -189,10 +189,9 @@ void PairLJSFDipoleSF::compute(int eflag, int vflag)
             r3inv = r2inv*rinv;
             r5inv = r3inv*r2inv;
             pidotr = mu[i][0]*delx + mu[i][1]*dely + mu[i][2]*delz;
-            rcutcoul2inv=1.0/cut_coulsq[itype][jtype];
             pre1 = 3.0 * q[j] * r5inv * pidotr * (1-rsq*rcutcoul2inv);
             pqfac = 1.0 - 3.0*rsq*rcutcoul2inv +
-              2.0*rsq*sqrt(rsq)*rcutcoul2inv*sqrt(rcutcoul2inv);
+              2.0*rsq*sqrt(rsq*rcutcoul2inv)*rcutcoul2inv;
             pre2 = q[j] * r3inv * pqfac;
 
             forcecoulx += pre2*mu[i][0] - pre1*delx;
@@ -207,10 +206,9 @@ void PairLJSFDipoleSF::compute(int eflag, int vflag)
             r3inv = r2inv*rinv;
             r5inv = r3inv*r2inv;
             pjdotr = mu[j][0]*delx + mu[j][1]*dely + mu[j][2]*delz;
-            rcutcoul2inv=1.0/cut_coulsq[itype][jtype];
             pre1 = 3.0 * qtmp * r5inv * pjdotr * (1-rsq*rcutcoul2inv);
             qpfac = 1.0 - 3.0*rsq*rcutcoul2inv +
-              2.0*rsq*sqrt(rsq)*rcutcoul2inv*sqrt(rcutcoul2inv);
+              2.0*rsq*sqrt(rsq*rcutcoul2inv)*rcutcoul2inv;
             pre2 = qtmp * r3inv * qpfac;
 
             forcecoulx += pre1*delx - pre2*mu[j][0];
@@ -263,7 +261,7 @@ void PairLJSFDipoleSF::compute(int eflag, int vflag)
 
         if (eflag) {
           if (rsq < cut_coulsq[itype][jtype]) {
-            ecoul = (1.0-sqrt(rsq)/sqrt(cut_coulsq[itype][jtype]));
+            ecoul = (1.0-sqrt(rsq/cut_coulsq[itype][jtype]));
             ecoul *= ecoul;
             ecoul *= qtmp * q[j] * rinv;
             if (mu[i][3] > 0.0 && mu[j][3] > 0.0)

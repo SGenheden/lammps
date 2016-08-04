@@ -15,10 +15,10 @@
    Contributing author: Aidan Thompson (SNL)
 ------------------------------------------------------------------------- */
 
-#include "math.h"
-#include "stdio.h"
-#include "stdlib.h"
-#include "string.h"
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include "pair_tersoff.h"
 #include "atom.h"
 #include "neighbor.h"
@@ -51,6 +51,7 @@ PairTersoff::PairTersoff(LAMMPS *lmp) : Pair(lmp)
   nparams = maxparam = 0;
   params = NULL;
   elem2param = NULL;
+  map = NULL;
 }
 
 /* ----------------------------------------------------------------------
@@ -313,20 +314,20 @@ void PairTersoff::coeff(int narg, char **arg)
   // read potential file and initialize potential parameters
 
   read_file(arg[2]);
-  setup();
+  setup_params();
 
   // clear setflag since coeff() called once with I,J = * *
 
   n = atom->ntypes;
-  for (int i = 1; i <= n; i++)
-    for (int j = i; j <= n; j++)
+  for (i = 1; i <= n; i++)
+    for (j = i; j <= n; j++)
       setflag[i][j] = 0;
 
   // set setflag i,j for type pairs where both are mapped to elements
 
   int count = 0;
-  for (int i = 1; i <= n; i++)
-    for (int j = i; j <= n; j++)
+  for (i = 1; i <= n; i++)
+    for (j = i; j <= n; j++)
       if (map[i] >= 0 && map[j] >= 0) {
         setflag[i][j] = 1;
         count++;
@@ -504,7 +505,7 @@ void PairTersoff::read_file(char *file)
 
 /* ---------------------------------------------------------------------- */
 
-void PairTersoff::setup()
+void PairTersoff::setup_params()
 {
   int i,j,k,m,n;
 
@@ -692,7 +693,9 @@ double PairTersoff::ters_bij_d(double zeta, Param *param)
   if (tmp > param->c1) return param->beta * -0.5*pow(tmp,-1.5);
   if (tmp > param->c2)
     return param->beta * (-0.5*pow(tmp,-1.5) *
-                          (1.0 - 0.5*(1.0 +  1.0/(2.0*param->powern)) *
+			  // error in negligible 2nd term fixed 9/30/2015
+			  // (1.0 - 0.5*(1.0 +  1.0/(2.0*param->powern)) *
+                          (1.0 - (1.0 +  1.0/(2.0*param->powern)) *
                            pow(tmp,-param->powern)));
   if (tmp < param->c4) return 0.0;
   if (tmp < param->c3)

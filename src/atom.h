@@ -76,6 +76,25 @@ class Atom : protected Pointers {
   double *rho,*drho,*e,*de,*cv;
   double **vest;
 
+  // USER-SMD package
+
+  double *contact_radius;
+  double **smd_data_9;
+  double **smd_stress;
+  double *eff_plastic_strain;
+  double *eff_plastic_strain_rate;
+  double *damage;
+
+  // USER-DPD package
+
+  double *uCond,*uMech,*uChem,*uCGnew,*uCG;
+  double *duChem;
+  double *dpdTheta;
+  int nspecies_dpd;
+  int *ssaAIR; // Shardlow Splitting Algorithm Active Interaction Region number
+
+  // molecular info
+
   int **nspecial;               // 0,1,2 = cummulative # of 1-2,1-3,1-4 neighs
   tagint **special;             // IDs of 1-2,1-3,1-4 neighs of each atom
   int maxspecial;               // special[nlocal][maxspecial]
@@ -122,6 +141,18 @@ class Atom : protected Pointers {
   int vfrac_flag,spin_flag,eradius_flag,ervel_flag,erforce_flag;
   int cs_flag,csforce_flag,vforce_flag,ervelforce_flag,etag_flag;
   int rho_flag,e_flag,cv_flag,vest_flag;
+  int dpd_flag;
+
+  // USER-SMD package
+
+  int smd_flag;
+  int contact_radius_flag;
+  int smd_data_9_flag;
+  int smd_stress_flag;
+  int x0_flag;
+  int eff_plastic_strain_flag;
+  int eff_plastic_strain_rate_flag;
+  int damage_flag;
 
   // Peridynamics scale factor, used by dump cfg
 
@@ -173,7 +204,7 @@ class Atom : protected Pointers {
 
   void settings(class Atom *);
   void create_avec(const char *, int, char **, int);
-  class AtomVec *new_avec(const char *, int, int &);
+  virtual class AtomVec *new_avec(const char *, int, int &);
   void init();
   void setup();
 
@@ -185,16 +216,17 @@ class Atom : protected Pointers {
 
   int parse_data(const char *);
   int count_words(const char *);
+  int count_words(const char *, char *);
 
   void deallocate_topology();
 
   void data_atoms(int, char *, tagint, int, int, double *);
   void data_vels(int, char *, tagint);
 
-  void data_bonds(int, char *, int *, tagint);
-  void data_angles(int, char *, int *, tagint);
-  void data_dihedrals(int, char *, int *, tagint);
-  void data_impropers(int, char *, int *, tagint);
+  void data_bonds(int, char *, int *, tagint, int);
+  void data_angles(int, char *, int *, tagint, int);
+  void data_dihedrals(int, char *, int *, tagint, int);
+  void data_impropers(int, char *, int *, tagint, int);
 
   void data_bonus(int, char *, class AtomVec *, tagint);
   void data_bodies(int, char *, class AtomVecBody *, tagint);
@@ -223,7 +255,7 @@ class Atom : protected Pointers {
   int find_custom(char *, int &);
   int add_custom(char *, int);
   void remove_custom(int, int);
-  
+
   virtual void sync_modify(ExecutionSpace, unsigned int, unsigned int) {}
 
   void *extract(char *);
@@ -330,23 +362,31 @@ E: Atom_modify sort and first options cannot be used together
 
 Self-explanatory.
 
-E: Atom ID is negative
+E: One or more Atom IDs is negative
 
-Self-explanatory.
+Atom IDs must be positive integers.
 
-E: Atom ID is too big
+E: One or more atom IDs is too big
 
 The limit on atom IDs is set by the SMALLBIG, BIGBIG, SMALLSMALL
 setting in your Makefile.  See Section_start 2.2 of the manual for
 more details.
 
-E: Atom ID is zero
+E: One or more atom IDs is zero
 
 Either all atoms IDs must be zero or none of them.
 
-E: Not all atom IDs are 0
+E: Non-zero atom IDs with atom_modify id = no
 
-Either all atoms IDs must be zero or none of them.
+Self-explanatory.
+
+E: All atom IDs = 0 but atom_modify id = yes
+
+Self-explanatory.
+
+E: Duplicate atom IDs exist
+
+Self-explanatory.
 
 E: New atom IDs exceed maximum allowed ID
 
@@ -356,6 +396,10 @@ E: Incorrect atom format in data file
 
 Number of values per atom line in the data file is not consistent with
 the atom style.
+
+E: Invalid atom type in Atoms section of data file
+
+Atom types must range from 1 to specified # of types.
 
 E: Incorrect velocity format in data file
 

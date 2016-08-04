@@ -11,9 +11,9 @@
    See the README file in the top-level LAMMPS directory.
 ------------------------------------------------------------------------- */
 
-#include "math.h"
-#include "string.h"
-#include "stdlib.h"
+#include <math.h>
+#include <string.h>
+#include <stdlib.h>
 #include "compute_coord_atom.h"
 #include "atom.h"
 #include "update.h"
@@ -125,7 +125,7 @@ void ComputeCoordAtom::compute_peratom()
 
   // grow coordination array if necessary
 
-  if (atom->nlocal > nmax) {
+  if (atom->nmax > nmax) {
     if (ncol == 1) {
       memory->destroy(cvec);
       nmax = atom->nmax;
@@ -169,7 +169,7 @@ void ComputeCoordAtom::compute_peratom()
         for (jj = 0; jj < jnum; jj++) {
           j = jlist[jj];
           j &= NEIGHMASK;
-          
+
           jtype = type[j];
           delx = xtmp - x[j][0];
           dely = ytmp - x[j][1];
@@ -177,7 +177,7 @@ void ComputeCoordAtom::compute_peratom()
           rsq = delx*delx + dely*dely + delz*delz;
           if (rsq < cutsq && jtype >= typelo[0] && jtype <= typehi[0]) n++;
         }
-        
+
         cvec[i] = n;
       } else cvec[i] = 0.0;
     }
@@ -199,7 +199,7 @@ void ComputeCoordAtom::compute_peratom()
         for (jj = 0; jj < jnum; jj++) {
           j = jlist[jj];
           j &= NEIGHMASK;
-          
+
           jtype = type[j];
           delx = xtmp - x[j][0];
           dely = ytmp - x[j][1];

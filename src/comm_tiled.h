@@ -33,10 +33,12 @@ class CommTiled : public Comm {
 
   void forward_comm_pair(class Pair *);    // forward comm from a Pair
   void reverse_comm_pair(class Pair *);    // reverse comm from a Pair
-  virtual void forward_comm_fix(class Fix *, int size=0);  
+  virtual void forward_comm_fix(class Fix *, int size=0);
                                                    // forward comm from a Fix
   virtual void reverse_comm_fix(class Fix *, int size=0);
                                                    // reverse comm from a Fix
+  virtual void reverse_comm_fix_variable(class Fix *);
+                                     // variable size reverse comm from a Fix
   void forward_comm_compute(class Compute *);  // forward from a Compute
   void reverse_comm_compute(class Compute *);  // reverse from a Compute
   void forward_comm_dump(class Dump *);    // forward comm from a Dump
@@ -110,6 +112,7 @@ class CommTiled : public Comm {
   double *sublo,*subhi;
   int dimension;
 
+  // NOTE: init_buffers is called from a constructor and must not be made virtual
   void init_buffers();
 
   // box drop and other functions

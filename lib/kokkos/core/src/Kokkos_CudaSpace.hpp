@@ -75,6 +75,10 @@ public:
 
   typedef unsigned int          size_type ;
 
+  /*--------------------------------*/
+
+#if ! KOKKOS_USING_EXP_VIEW
+
   typedef Impl::CudaMallocAllocator allocator;
 
   /** \brief  Allocate a contiguous block of memory.
@@ -96,17 +100,21 @@ public:
                                    );
 #endif
 
+#endif /* #if ! KOKKOS_USING_EXP_VIEW */
+
   /*--------------------------------*/
 
   CudaSpace();
+  CudaSpace( CudaSpace && rhs ) = default ;
   CudaSpace( const CudaSpace & rhs ) = default ;
+  CudaSpace & operator = ( CudaSpace && rhs ) = default ;
   CudaSpace & operator = ( const CudaSpace & rhs ) = default ;
   ~CudaSpace() = default ;
 
-  /**\brief  Allocate memory in the cuda space */
+  /**\brief  Allocate untracked memory in the cuda space */
   void * allocate( const size_t arg_alloc_size ) const ;
 
-  /**\brief  Deallocate memory in the cuda space */
+  /**\brief  Deallocate untracked memory in the cuda space */
   void deallocate( void * const arg_alloc_ptr
                  , const size_t arg_alloc_size ) const ;
 
@@ -162,6 +170,10 @@ public:
   /** \brief  If UVM capability is available */
   static bool available();
 
+  /*--------------------------------*/
+
+#if ! KOKKOS_USING_EXP_VIEW
+
   typedef Impl::CudaUVMAllocator allocator;
 
   /** \brief  Allocate a contiguous block of memory.
@@ -182,17 +194,22 @@ public:
                                     , ::cudaChannelFormatDesc const & desc
                                    );
 #endif
+
+#endif /* #if ! KOKKOS_USING_EXP_VIEW */
+
   /*--------------------------------*/
 
   CudaUVMSpace();
+  CudaUVMSpace( CudaUVMSpace && rhs ) = default ;
   CudaUVMSpace( const CudaUVMSpace & rhs ) = default ;
+  CudaUVMSpace & operator = ( CudaUVMSpace && rhs ) = default ;
   CudaUVMSpace & operator = ( const CudaUVMSpace & rhs ) = default ;
   ~CudaUVMSpace() = default ;
 
-  /**\brief  Allocate memory in the cuda space */
+  /**\brief  Allocate untracked memory in the cuda space */
   void * allocate( const size_t arg_alloc_size ) const ;
 
-  /**\brief  Deallocate memory in the cuda space */
+  /**\brief  Deallocate untracked memory in the cuda space */
   void deallocate( void * const arg_alloc_ptr
                  , const size_t arg_alloc_size ) const ;
 
@@ -223,6 +240,9 @@ public:
   typedef Kokkos::Device<execution_space,memory_space> device_type;
   typedef unsigned int                size_type ;
 
+  /*--------------------------------*/
+
+#if ! KOKKOS_USING_EXP_VIEW
 
   typedef Impl::CudaHostAllocator allocator ;
 
@@ -234,17 +254,21 @@ public:
    */
   static Impl::AllocationTracker allocate_and_track( const std::string & label, const size_t size );
 
+#endif /* #if ! KOKKOS_USING_EXP_VIEW */
+
   /*--------------------------------*/
 
   CudaHostPinnedSpace();
+  CudaHostPinnedSpace( CudaHostPinnedSpace && rhs ) = default ;
   CudaHostPinnedSpace( const CudaHostPinnedSpace & rhs ) = default ;
+  CudaHostPinnedSpace & operator = ( CudaHostPinnedSpace && rhs ) = default ;
   CudaHostPinnedSpace & operator = ( const CudaHostPinnedSpace & rhs ) = default ;
   ~CudaHostPinnedSpace() = default ;
 
-  /**\brief  Allocate memory in the cuda space */
+  /**\brief  Allocate untracked memory in the space */
   void * allocate( const size_t arg_alloc_size ) const ;
 
-  /**\brief  Deallocate memory in the cuda space */
+  /**\brief  Deallocate untracked memory in the space */
   void deallocate( void * const arg_alloc_ptr
                  , const size_t arg_alloc_size ) const ;
 
@@ -259,109 +283,243 @@ public:
 namespace Kokkos {
 namespace Impl {
 
-template<> struct DeepCopy< CudaSpace , CudaSpace >
+void DeepCopyAsyncCuda( void * dst , const void * src , size_t n);
+
+template<> struct DeepCopy< CudaSpace , CudaSpace , Cuda>
 {
   DeepCopy( void * dst , const void * src , size_t );
   DeepCopy( const Cuda & , void * dst , const void * src , size_t );
 };
 
-template<> struct DeepCopy< CudaSpace , HostSpace >
+template<> struct DeepCopy< CudaSpace , HostSpace , Cuda >
 {
   DeepCopy( void * dst , const void * src , size_t );
   DeepCopy( const Cuda & , void * dst , const void * src , size_t );
 };
 
-template<> struct DeepCopy< HostSpace , CudaSpace >
+template<> struct DeepCopy< HostSpace , CudaSpace , Cuda >
 {
   DeepCopy( void * dst , const void * src , size_t );
   DeepCopy( const Cuda & , void * dst , const void * src , size_t );
 };
 
-template<> struct DeepCopy< CudaSpace , CudaUVMSpace >
+template<class ExecutionSpace> struct DeepCopy< CudaSpace , CudaSpace , ExecutionSpace >
 {
   inline
   DeepCopy( void * dst , const void * src , size_t n )
-  { (void) DeepCopy< CudaSpace , CudaSpace >( dst , src , n ); }
+  { (void) DeepCopy< CudaSpace , CudaSpace , Cuda >( dst , src , n ); }
+
+  inline
+  DeepCopy( const ExecutionSpace& exec, void * dst , const void * src , size_t n )
+  {
+    exec.fence();
+    DeepCopyAsyncCuda (dst,src,n);
+  }
 };
 
-template<> struct DeepCopy< CudaSpace , CudaHostPinnedSpace >
+template<class ExecutionSpace> struct DeepCopy< CudaSpace , HostSpace , ExecutionSpace >
 {
   inline
   DeepCopy( void * dst , const void * src , size_t n )
-  { (void) DeepCopy< CudaSpace , HostSpace >( dst , src , n ); }
+  { (void) DeepCopy< CudaSpace , HostSpace , Cuda>( dst , src , n ); }
+
+  inline
+  DeepCopy( const ExecutionSpace& exec, void * dst , const void * src , size_t n )
+  {
+    exec.fence();
+    DeepCopyAsyncCuda (dst,src,n);
+  }
+};
+
+template<class ExecutionSpace>
+struct DeepCopy< HostSpace , CudaSpace , ExecutionSpace >
+{
+  inline
+  DeepCopy( void * dst , const void * src , size_t n )
+  { (void) DeepCopy< HostSpace , CudaSpace , Cuda >( dst , src , n ); }
+
+  inline
+  DeepCopy( const ExecutionSpace& exec, void * dst , const void * src , size_t n )
+  {
+    exec.fence();
+    DeepCopyAsyncCuda (dst,src,n);
+  }
+};
+
+template<class ExecutionSpace>
+struct DeepCopy< CudaSpace , CudaUVMSpace , ExecutionSpace >
+{
+  inline
+  DeepCopy( void * dst , const void * src , size_t n )
+  { (void) DeepCopy< CudaSpace , CudaSpace , Cuda >( dst , src , n ); }
+
+  inline
+  DeepCopy( const ExecutionSpace& exec, void * dst , const void * src , size_t n )
+  {
+    exec.fence();
+    DeepCopyAsyncCuda (dst,src,n);
+  }
+};
+
+template<class ExecutionSpace>
+struct DeepCopy< CudaSpace , CudaHostPinnedSpace , ExecutionSpace>
+{
+  inline
+  DeepCopy( void * dst , const void * src , size_t n )
+  { (void) DeepCopy< CudaSpace , HostSpace , Cuda >( dst , src , n ); }
+
+  inline
+  DeepCopy( const ExecutionSpace& exec, void * dst , const void * src , size_t n )
+  {
+    exec.fence();
+    DeepCopyAsyncCuda (dst,src,n);
+  }
 };
 
 
-template<> struct DeepCopy< CudaUVMSpace , CudaSpace >
+template<class ExecutionSpace>
+struct DeepCopy< CudaUVMSpace , CudaSpace , ExecutionSpace>
 {
   inline
   DeepCopy( void * dst , const void * src , size_t n )
-  { (void) DeepCopy< CudaSpace , CudaSpace >( dst , src , n ); }
+  { (void) DeepCopy< CudaSpace , CudaSpace , Cuda >( dst , src , n ); }
+
+  inline
+  DeepCopy( const ExecutionSpace& exec, void * dst , const void * src , size_t n )
+  {
+    exec.fence();
+    DeepCopyAsyncCuda (dst,src,n);
+  }
 };
 
-template<> struct DeepCopy< CudaUVMSpace , CudaUVMSpace >
+template<class ExecutionSpace>
+struct DeepCopy< CudaUVMSpace , CudaUVMSpace , ExecutionSpace>
 {
   inline
   DeepCopy( void * dst , const void * src , size_t n )
-  { (void) DeepCopy< CudaSpace , CudaSpace >( dst , src , n ); }
+  { (void) DeepCopy< CudaSpace , CudaSpace , Cuda >( dst , src , n ); }
+
+  inline
+  DeepCopy( const ExecutionSpace& exec, void * dst , const void * src , size_t n )
+  {
+    exec.fence();
+    DeepCopyAsyncCuda (dst,src,n);
+  }
 };
 
-template<> struct DeepCopy< CudaUVMSpace , CudaHostPinnedSpace >
+template<class ExecutionSpace>
+struct DeepCopy< CudaUVMSpace , CudaHostPinnedSpace , ExecutionSpace>
 {
   inline
   DeepCopy( void * dst , const void * src , size_t n )
-  { (void) DeepCopy< CudaSpace , HostSpace >( dst , src , n ); }
+  { (void) DeepCopy< CudaSpace , HostSpace , Cuda >( dst , src , n ); }
+
+  inline
+  DeepCopy( const ExecutionSpace& exec, void * dst , const void * src , size_t n )
+  {
+    exec.fence();
+    DeepCopyAsyncCuda (dst,src,n);
+  }
 };
 
-template<> struct DeepCopy< CudaUVMSpace , HostSpace >
+template<class ExecutionSpace> struct DeepCopy< CudaUVMSpace , HostSpace , ExecutionSpace >
 {
   inline
   DeepCopy( void * dst , const void * src , size_t n )
-  { (void) DeepCopy< CudaSpace , HostSpace >( dst , src , n ); }
-};
+  { (void) DeepCopy< CudaSpace , HostSpace , Cuda >( dst , src , n ); }
 
-
-template<> struct DeepCopy< CudaHostPinnedSpace , CudaSpace >
-{
   inline
-  DeepCopy( void * dst , const void * src , size_t n )
-  { (void) DeepCopy< HostSpace , CudaSpace >( dst , src , n ); }
-};
-
-template<> struct DeepCopy< CudaHostPinnedSpace , CudaUVMSpace >
-{
-  inline
-  DeepCopy( void * dst , const void * src , size_t n )
-  { (void) DeepCopy< HostSpace , CudaSpace >( dst , src , n ); }
-};
-
-template<> struct DeepCopy< CudaHostPinnedSpace , CudaHostPinnedSpace >
-{
-  inline
-  DeepCopy( void * dst , const void * src , size_t n )
-  { (void) DeepCopy< HostSpace , HostSpace >( dst , src , n ); }
-};
-
-template<> struct DeepCopy< CudaHostPinnedSpace , HostSpace >
-{
-  inline
-  DeepCopy( void * dst , const void * src , size_t n )
-  { (void) DeepCopy< HostSpace , HostSpace >( dst , src , n ); }
+  DeepCopy( const ExecutionSpace& exec, void * dst , const void * src , size_t n )
+  {
+    exec.fence();
+    DeepCopyAsyncCuda (dst,src,n);
+  }
 };
 
 
-template<> struct DeepCopy< HostSpace , CudaUVMSpace >
+template<class ExecutionSpace> struct DeepCopy< CudaHostPinnedSpace , CudaSpace , ExecutionSpace >
 {
   inline
   DeepCopy( void * dst , const void * src , size_t n )
-  { (void) DeepCopy< HostSpace , CudaSpace >( dst , src , n ); }
+  { (void) DeepCopy< HostSpace , CudaSpace , Cuda >( dst , src , n ); }
+
+  inline
+  DeepCopy( const ExecutionSpace& exec, void * dst , const void * src , size_t n )
+  {
+    exec.fence();
+    DeepCopyAsyncCuda (dst,src,n);
+  }
 };
 
-template<> struct DeepCopy< HostSpace , CudaHostPinnedSpace >
+template<class ExecutionSpace> struct DeepCopy< CudaHostPinnedSpace , CudaUVMSpace , ExecutionSpace >
 {
   inline
   DeepCopy( void * dst , const void * src , size_t n )
-  { (void) DeepCopy< HostSpace , HostSpace >( dst , src , n ); }
+  { (void) DeepCopy< HostSpace , CudaSpace , Cuda >( dst , src , n ); }
+
+  inline
+  DeepCopy( const ExecutionSpace& exec, void * dst , const void * src , size_t n )
+  {
+    exec.fence();
+    DeepCopyAsyncCuda (dst,src,n);
+  }
+};
+
+template<class ExecutionSpace> struct DeepCopy< CudaHostPinnedSpace , CudaHostPinnedSpace , ExecutionSpace >
+{
+  inline
+  DeepCopy( void * dst , const void * src , size_t n )
+  { (void) DeepCopy< HostSpace , HostSpace , Cuda >( dst , src , n ); }
+
+  inline
+  DeepCopy( const ExecutionSpace& exec, void * dst , const void * src , size_t n )
+  {
+    exec.fence();
+    DeepCopyAsyncCuda (dst,src,n);
+  }
+};
+
+template<class ExecutionSpace> struct DeepCopy< CudaHostPinnedSpace , HostSpace , ExecutionSpace >
+{
+  inline
+  DeepCopy( void * dst , const void * src , size_t n )
+  { (void) DeepCopy< HostSpace , HostSpace , Cuda >( dst , src , n ); }
+
+  inline
+  DeepCopy( const ExecutionSpace& exec, void * dst , const void * src , size_t n )
+  {
+    exec.fence();
+    DeepCopyAsyncCuda (dst,src,n);
+  }
+};
+
+
+template<class ExecutionSpace> struct DeepCopy< HostSpace , CudaUVMSpace , ExecutionSpace >
+{
+  inline
+  DeepCopy( void * dst , const void * src , size_t n )
+  { (void) DeepCopy< HostSpace , CudaSpace , Cuda >( dst , src , n ); }
+
+  inline
+  DeepCopy( const ExecutionSpace& exec, void * dst , const void * src , size_t n )
+  {
+    exec.fence();
+    DeepCopyAsyncCuda (dst,src,n);
+  }
+};
+
+template<class ExecutionSpace> struct DeepCopy< HostSpace , CudaHostPinnedSpace , ExecutionSpace >
+{
+  inline
+  DeepCopy( void * dst , const void * src , size_t n )
+  { (void) DeepCopy< HostSpace , HostSpace , Cuda >( dst , src , n ); }
+
+  inline
+  DeepCopy( const ExecutionSpace& exec, void * dst , const void * src , size_t n )
+  {
+    exec.fence();
+    DeepCopyAsyncCuda (dst,src,n);
+  }
 };
 
 } // namespace Impl
@@ -497,8 +655,24 @@ public:
 
   static SharedAllocationRecord * allocate( const Kokkos::CudaSpace &  arg_space
                                           , const std::string       &  arg_label
-                                          , const size_t               arg_alloc_size
-                                          );
+                                          , const size_t               arg_alloc_size );
+
+  /**\brief  Allocate tracked memory in the space */
+  static
+  void * allocate_tracked( const Kokkos::CudaSpace & arg_space
+                         , const std::string & arg_label
+                         , const size_t arg_alloc_size );
+
+  /**\brief  Reallocate tracked memory in the space */
+  static
+  void * reallocate_tracked( void * const arg_alloc_ptr
+                           , const size_t arg_alloc_size );
+
+  /**\brief  Deallocate tracked memory in the space */
+  static
+  void deallocate_tracked( void * const arg_alloc_ptr );
+
+  static SharedAllocationRecord * get_record( void * arg_alloc_ptr );
 
   template< typename AliasType >
   inline
@@ -525,8 +699,6 @@ public:
       // Texture object is attached to the entire allocation range
       return ptr - reinterpret_cast<AliasType*>( RecordBase::m_alloc_ptr );
     }
-
-  static SharedAllocationRecord * get_record( void * arg_alloc_ptr );
 
   static void print_records( std::ostream & , const Kokkos::CudaSpace & , bool detail = false );
 };
@@ -570,6 +742,24 @@ public:
                                           , const size_t                  arg_alloc_size
                                           );
 
+  /**\brief  Allocate tracked memory in the space */
+  static
+  void * allocate_tracked( const Kokkos::CudaUVMSpace & arg_space
+                         , const std::string & arg_label
+                         , const size_t arg_alloc_size );
+
+  /**\brief  Reallocate tracked memory in the space */
+  static
+  void * reallocate_tracked( void * const arg_alloc_ptr
+                           , const size_t arg_alloc_size );
+
+  /**\brief  Deallocate tracked memory in the space */
+  static
+  void deallocate_tracked( void * const arg_alloc_ptr );
+
+  static SharedAllocationRecord * get_record( void * arg_alloc_ptr );
+
+
   template< typename AliasType >
   inline
   ::cudaTextureObject_t attach_texture_object()
@@ -596,8 +786,6 @@ public:
       // Texture object is attached to the entire allocation range
       return ptr - reinterpret_cast<AliasType*>( RecordBase::m_alloc_ptr );
     }
-
-  static SharedAllocationRecord * get_record( void * arg_alloc_ptr );
 
   static void print_records( std::ostream & , const Kokkos::CudaUVMSpace & , bool detail = false );
 };
@@ -638,6 +826,21 @@ public:
                                           , const std::string          &  arg_label
                                           , const size_t                  arg_alloc_size
                                           );
+  /**\brief  Allocate tracked memory in the space */
+  static
+  void * allocate_tracked( const Kokkos::CudaHostPinnedSpace & arg_space
+                         , const std::string & arg_label
+                         , const size_t arg_alloc_size );
+
+  /**\brief  Reallocate tracked memory in the space */
+  static
+  void * reallocate_tracked( void * const arg_alloc_ptr
+                           , const size_t arg_alloc_size );
+
+  /**\brief  Deallocate tracked memory in the space */
+  static
+  void deallocate_tracked( void * const arg_alloc_ptr );
+
 
   static SharedAllocationRecord * get_record( void * arg_alloc_ptr );
 

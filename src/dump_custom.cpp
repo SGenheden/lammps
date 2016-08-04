@@ -11,9 +11,9 @@
    See the README file in the top-level LAMMPS directory.
 ------------------------------------------------------------------------- */
 
-#include "math.h"
-#include "stdlib.h"
-#include "string.h"
+#include <math.h>
+#include <stdlib.h>
+#include <string.h>
 #include "dump_custom.h"
 #include "atom.h"
 #include "force.h"
@@ -60,10 +60,19 @@ DumpCustom::DumpCustom(LAMMPS *lmp, int narg, char **arg) :
   clearstep = 1;
 
   nevery = force->inumeric(FLERR,arg[3]);
+  if (nevery <= 0) error->all(FLERR,"Illegal dump custom command");
 
-  // size_one may be shrunk below if additional optional args exist
+  // expand args if any have wildcard character "*"
+  // ok to include trailing optional args,
+  //   so long as they do not have "*" between square brackets
+  // nfield may be shrunk below if extra optional args exist
 
-  size_one = nfield = narg - 5;
+  expand = 0;
+  nfield = input->expand_args(narg-5,&arg[5],1,earg);
+  if (earg != &arg[5]) expand = 1;
+
+  // allocate field vectors
+
   pack_choice = new FnPtrPack[nfield];
   vtype = new int[nfield];
 
@@ -99,15 +108,24 @@ DumpCustom::DumpCustom(LAMMPS *lmp, int narg, char **arg) :
   flag_custom = NULL;
 
   // process attributes
-  // ioptional = start of additional optional args
-  // only dump image and dump movie styles process optional args
+  // ioptional = start of additional optional args in expanded args
 
-  ioptional = parse_fields(narg,arg);
+  ioptional = parse_fields(nfield,earg);
 
-  if (ioptional < narg && 
+  if (ioptional < nfield &&
       strcmp(style,"image") != 0 && strcmp(style,"movie") != 0)
     error->all(FLERR,"Invalid attribute in dump custom command");
-  size_one = nfield = ioptional - 5;
+
+  // noptional = # of optional args
+  // reset nfield to subtract off optional args
+  // reset ioptional to what it would be in original arg list
+  // only dump image and dump movie styles process optional args,
+  //   they do not use expanded earg list
+
+  int noptional = nfield - ioptional;
+  nfield -= noptional;
+  size_one = nfield;
+  ioptional = narg - noptional;
 
   // atom selection arrays
 
@@ -139,11 +157,11 @@ DumpCustom::DumpCustom(LAMMPS *lmp, int narg, char **arg) :
   // setup column string
 
   int n = 0;
-  for (int iarg = 5; iarg < narg; iarg++) n += strlen(arg[iarg]) + 2;
+  for (int iarg = 0; iarg < nfield; iarg++) n += strlen(earg[iarg]) + 2;
   columns = new char[n];
   columns[0] = '\0';
-  for (int iarg = 5; iarg < narg; iarg++) {
-    strcat(columns,arg[iarg]);
+  for (int iarg = 0; iarg < nfield; iarg++) {
+    strcat(columns,earg[iarg]);
     strcat(columns," ");
   }
 }
@@ -152,6 +170,14 @@ DumpCustom::DumpCustom(LAMMPS *lmp, int narg, char **arg) :
 
 DumpCustom::~DumpCustom()
 {
+  // if wildcard expansion occurred, free earg memory from expand_args()
+  // could not do in constructor, b/c some derived classes process earg
+
+  if (expand) {
+    for (int i = 0; i < nfield; i++) delete [] earg[i];
+    memory->sfree(earg);
+  }
+
   delete [] pack_choice;
   delete [] vtype;
   memory->destroy(field2index);
@@ -385,7 +411,7 @@ int DumpCustom::count()
   // grow choose and variable vbuf arrays if needed
 
   int nlocal = atom->nlocal;
-  if (nlocal > maxlocal) {
+  if (atom->nmax > maxlocal) {
     maxlocal = atom->nmax;
 
     memory->destroy(choose);
@@ -451,7 +477,7 @@ int DumpCustom::count()
         choose[i] = 0;
   }
 
-  // un-choose if any threshhold criterion isn't met
+  // un-choose if any threshold criterion isn't met
 
   if (nthresh) {
     double *ptr;
@@ -471,7 +497,7 @@ int DumpCustom::count()
       } else if (thresh_array[ithresh] == MOL) {
         if (!atom->molecule_flag)
           error->all(FLERR,
-                     "Threshhold for an atom property that isn't allocated");
+                     "Threshold for an atom property that isn't allocated");
         tagint *molecule = atom->molecule;
         for (i = 0; i < nlocal; i++) dchoose[i] = molecule[i];
         ptr = dchoose;
@@ -581,7 +607,7 @@ int DumpCustom::count()
         imageint *image = atom->image;
         double yprd = domain->yprd;
         for (i = 0; i < nlocal; i++)
-          dchoose[i] = x[i][1] + 
+          dchoose[i] = x[i][1] +
             ((image[i] >> IMGBITS & IMGMASK) - IMGMAX) * yprd;
         ptr = dchoose;
         nstride = 1;
@@ -637,7 +663,7 @@ int DumpCustom::count()
         double boxxlo = domain->boxlo[0];
         double invxprd = 1.0/domain->xprd;
         for (i = 0; i < nlocal; i++)
-          dchoose[i] = (x[i][0] - boxxlo) * invxprd + 
+          dchoose[i] = (x[i][0] - boxxlo) * invxprd +
             (image[i] & IMGMASK) - IMGMAX;
         ptr = dchoose;
         nstride = 1;
@@ -649,7 +675,7 @@ int DumpCustom::count()
         double invyprd = 1.0/domain->yprd;
         for (i = 0; i < nlocal; i++)
           dchoose[i] =
-            (x[i][1] - boxylo) * invyprd + 
+            (x[i][1] - boxylo) * invyprd +
             (image[i] >> IMGBITS & IMGMASK) - IMGMAX;
         ptr = dchoose;
         nstride = 1;
@@ -660,7 +686,7 @@ int DumpCustom::count()
         double boxzlo = domain->boxlo[2];
         double invzprd = 1.0/domain->zprd;
         for (i = 0; i < nlocal; i++)
-          dchoose[i] = (x[i][2] - boxzlo) * invzprd + 
+          dchoose[i] = (x[i][2] - boxzlo) * invzprd +
             (image[i] >> IMG2BITS) - IMGMAX;
         ptr = dchoose;
         nstride = 1;
@@ -740,44 +766,44 @@ int DumpCustom::count()
       } else if (thresh_array[ithresh] == Q) {
         if (!atom->q_flag)
           error->all(FLERR,
-                     "Threshhold for an atom property that isn't allocated");
+                     "Threshold for an atom property that isn't allocated");
         ptr = atom->q;
         nstride = 1;
       } else if (thresh_array[ithresh] == MUX) {
         if (!atom->mu_flag)
           error->all(FLERR,
-                     "Threshhold for an atom property that isn't allocated");
+                     "Threshold for an atom property that isn't allocated");
         ptr = &atom->mu[0][0];
         nstride = 4;
       } else if (thresh_array[ithresh] == MUY) {
         if (!atom->mu_flag)
           error->all(FLERR,
-                     "Threshhold for an atom property that isn't allocated");
+                     "Threshold for an atom property that isn't allocated");
         ptr = &atom->mu[0][1];
         nstride = 4;
       } else if (thresh_array[ithresh] == MUZ) {
         if (!atom->mu_flag)
           error->all(FLERR,
-                     "Threshhold for an atom property that isn't allocated");
+                     "Threshold for an atom property that isn't allocated");
         ptr = &atom->mu[0][2];
         nstride = 4;
       } else if (thresh_array[ithresh] == MU) {
         if (!atom->mu_flag)
           error->all(FLERR,
-                     "Threshhold for an atom property that isn't allocated");
+                     "Threshold for an atom property that isn't allocated");
         ptr = &atom->mu[0][3];
         nstride = 4;
 
       } else if (thresh_array[ithresh] == RADIUS) {
         if (!atom->radius_flag)
           error->all(FLERR,
-                     "Threshhold for an atom property that isn't allocated");
+                     "Threshold for an atom property that isn't allocated");
         ptr = atom->radius;
         nstride = 1;
       } else if (thresh_array[ithresh] == DIAMETER) {
         if (!atom->radius_flag)
           error->all(FLERR,
-                     "Threshhold for an atom property that isn't allocated");
+                     "Threshold for an atom property that isn't allocated");
         double *radius = atom->radius;
         for (i = 0; i < nlocal; i++) dchoose[i] = 2.0*radius[i];
         ptr = dchoose;
@@ -785,55 +811,55 @@ int DumpCustom::count()
       } else if (thresh_array[ithresh] == OMEGAX) {
         if (!atom->omega_flag)
           error->all(FLERR,
-                     "Threshhold for an atom property that isn't allocated");
+                     "Threshold for an atom property that isn't allocated");
         ptr = &atom->omega[0][0];
         nstride = 3;
       } else if (thresh_array[ithresh] == OMEGAY) {
         if (!atom->omega_flag)
           error->all(FLERR,
-                     "Threshhold for an atom property that isn't allocated");
+                     "Threshold for an atom property that isn't allocated");
         ptr = &atom->omega[0][1];
         nstride = 3;
       } else if (thresh_array[ithresh] == OMEGAZ) {
         if (!atom->omega_flag)
           error->all(FLERR,
-                     "Threshhold for an atom property that isn't allocated");
+                     "Threshold for an atom property that isn't allocated");
         ptr = &atom->omega[0][2];
         nstride = 3;
       } else if (thresh_array[ithresh] == ANGMOMX) {
         if (!atom->angmom_flag)
           error->all(FLERR,
-                     "Threshhold for an atom property that isn't allocated");
+                     "Threshold for an atom property that isn't allocated");
         ptr = &atom->angmom[0][0];
         nstride = 3;
       } else if (thresh_array[ithresh] == ANGMOMY) {
         if (!atom->angmom_flag)
           error->all(FLERR,
-                     "Threshhold for an atom property that isn't allocated");
+                     "Threshold for an atom property that isn't allocated");
         ptr = &atom->angmom[0][1];
         nstride = 3;
       } else if (thresh_array[ithresh] == ANGMOMZ) {
         if (!atom->angmom_flag)
           error->all(FLERR,
-                     "Threshhold for an atom property that isn't allocated");
+                     "Threshold for an atom property that isn't allocated");
         ptr = &atom->angmom[0][2];
         nstride = 3;
       } else if (thresh_array[ithresh] == TQX) {
         if (!atom->torque_flag)
           error->all(FLERR,
-                     "Threshhold for an atom property that isn't allocated");
+                     "Threshold for an atom property that isn't allocated");
         ptr = &atom->torque[0][0];
         nstride = 3;
       } else if (thresh_array[ithresh] == TQY) {
         if (!atom->torque_flag)
           error->all(FLERR,
-                     "Threshhold for an atom property that isn't allocated");
+                     "Threshold for an atom property that isn't allocated");
         ptr = &atom->torque[0][1];
         nstride = 3;
       } else if (thresh_array[ithresh] == TQZ) {
         if (!atom->torque_flag)
           error->all(FLERR,
-                     "Threshhold for an atom property that isn't allocated");
+                     "Threshold for an atom property that isn't allocated");
         ptr = &atom->torque[0][2];
         nstride = 3;
 
@@ -881,7 +907,7 @@ int DumpCustom::count()
         nstride = 1;
       }
 
-      // unselect atoms that don't meet threshhold criterion
+      // unselect atoms that don't meet threshold criterion
 
       value = thresh_value[ithresh];
 
@@ -949,13 +975,13 @@ int DumpCustom::convert_string(int n, double *mybuf)
     }
 
     for (j = 0; j < size_one; j++) {
-      if (vtype[j] == INT) 
+      if (vtype[j] == INT)
         offset += sprintf(&sbuf[offset],vformat[j],static_cast<int> (mybuf[m]));
-      else if (vtype[j] == DOUBLE) 
+      else if (vtype[j] == DOUBLE)
         offset += sprintf(&sbuf[offset],vformat[j],mybuf[m]);
       else if (vtype[j] == STRING)
         offset += sprintf(&sbuf[offset],vformat[j],typenames[(int) mybuf[m]]);
-      else if (vtype[j] == BIGINT) 
+      else if (vtype[j] == BIGINT)
         offset += sprintf(&sbuf[offset],vformat[j],
                           static_cast<bigint> (mybuf[m]));
       m++;
@@ -1002,7 +1028,7 @@ void DumpCustom::write_lines(int n, double *mybuf)
       else if (vtype[j] == DOUBLE) fprintf(fp,vformat[j],mybuf[m]);
       else if (vtype[j] == STRING)
         fprintf(fp,vformat[j],typenames[(int) mybuf[m]]);
-      else if (vtype[j] == BIGINT) 
+      else if (vtype[j] == BIGINT)
         fprintf(fp,vformat[j],static_cast<bigint> (mybuf[m]));
       m++;
     }
@@ -1017,8 +1043,8 @@ int DumpCustom::parse_fields(int narg, char **arg)
   // customize by adding to if statement
 
   int i;
-  for (int iarg = 5; iarg < narg; iarg++) {
-    i = iarg-5;
+  for (int iarg = 0; iarg < narg; iarg++) {
+    i = iarg;
 
     if (strcmp(arg[iarg],"id") == 0) {
       pack_choice[i] = &DumpCustom::pack_id;
@@ -1306,7 +1332,7 @@ int DumpCustom::parse_fields(int narg, char **arg)
       n = atom->find_custom(suffix,tmp);
       if (n < 0)
         error->all(FLERR,"Could not find custom per-atom property ID");
-      
+
       if (tmp != 1)
         error->all(FLERR,"Custom per-atom property ID is not floating point");
 
@@ -1328,7 +1354,7 @@ int DumpCustom::parse_fields(int narg, char **arg)
       n = atom->find_custom(suffix,tmp);
       if (n < 0)
         error->all(FLERR,"Could not find custom per-atom property ID");
-      
+
       if (tmp != 0)
         error->all(FLERR,"Custom per-atom property ID is not integer");
 
@@ -1438,7 +1464,7 @@ int DumpCustom::add_custom(char *id, int flag)
     memory->srealloc(id_custom,(ncustom+1)*sizeof(char *),"dump:id_custom");
   flag_custom = (int *)
     memory->srealloc(flag_custom,(ncustom+1)*sizeof(int),"dump:flag_custom");
-  
+
   int n = strlen(id) + 1;
   id_custom[ncustom] = new char[n];
   strcpy(id_custom[ncustom],id);
@@ -1459,6 +1485,7 @@ int DumpCustom::modify_param(int narg, char **arg)
       iregion = domain->find_region(arg[1]);
       if (iregion == -1)
         error->all(FLERR,"Dump_modify region ID does not exist");
+      delete [] idregion;
       int n = strlen(arg[1]) + 1;
       idregion = new char[n];
       strcpy(idregion,arg[1]);
@@ -1502,13 +1529,13 @@ int DumpCustom::modify_param(int narg, char **arg)
 
     if (narg < 4) error->all(FLERR,"Illegal dump_modify command");
 
-    // grow threshhold arrays
+    // grow threshold arrays
 
     memory->grow(thresh_array,nthresh+1,"dump:thresh_array");
     memory->grow(thresh_op,(nthresh+1),"dump:thresh_op");
     memory->grow(thresh_value,(nthresh+1),"dump:thresh_value");
 
-    // set attribute type of threshhold
+    // set attribute type of threshold
     // customize by adding to if statement
 
     if (strcmp(arg[1],"id") == 0) thresh_array[nthresh] = ID;
@@ -1703,7 +1730,7 @@ int DumpCustom::modify_param(int narg, char **arg)
 
       int tmp = -1;
       n = atom->find_custom(suffix,tmp);
-      if ((n < 0) || (tmp != 1)) 
+      if ((n < 0) || (tmp != 1))
         error->all(FLERR,"Could not find dump modify "
                    "custom atom floating point property ID");
 
@@ -1724,7 +1751,7 @@ int DumpCustom::modify_param(int narg, char **arg)
 
       int tmp = -1;
       n = atom->find_custom(suffix,tmp);
-      if ((n < 0) || (tmp != 0)) 
+      if ((n < 0) || (tmp != 0))
         error->all(FLERR,"Could not find dump modify "
                    "custom atom integer property ID");
 
@@ -1733,7 +1760,7 @@ int DumpCustom::modify_param(int narg, char **arg)
 
     } else error->all(FLERR,"Invalid dump_modify threshhold operator");
 
-    // set operation type of threshhold
+    // set operation type of threshold
 
     if (strcmp(arg[2],"<") == 0) thresh_op[nthresh] = LT;
     else if (strcmp(arg[2],"<=") == 0) thresh_op[nthresh] = LE;
@@ -1741,9 +1768,9 @@ int DumpCustom::modify_param(int narg, char **arg)
     else if (strcmp(arg[2],">=") == 0) thresh_op[nthresh] = GE;
     else if (strcmp(arg[2],"==") == 0) thresh_op[nthresh] = EQ;
     else if (strcmp(arg[2],"!=") == 0) thresh_op[nthresh] = NEQ;
-    else error->all(FLERR,"Invalid dump_modify threshhold operator");
+    else error->all(FLERR,"Invalid dump_modify threshold operator");
 
-    // set threshhold value
+    // set threshold value
 
     thresh_value[nthresh] = force->numeric(FLERR,arg[3]);
 
@@ -1830,7 +1857,7 @@ void DumpCustom::pack_variable(int n)
 
 void DumpCustom::pack_custom(int n)
 {
-  
+
   int index = field2index[n];
 
   if (flag_custom[index] == 0) { // integer

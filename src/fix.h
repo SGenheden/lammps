@@ -38,6 +38,7 @@ class Fix : protected Pointers {
   int thermo_energy;             // 1 if fix_modify enabled ThEng, 0 if not
   int nevery;                    // how often to call an end_of_step fix
   int rigid_flag;                // 1 if Fix integrates rigid bodies, 0 if not
+  int peatom_flag;               // 1 if Fix contributes per-atom eng, 0 if not
   int virial_flag;               // 1 if Fix contributes to virial, 0 if not
   int no_change_box;             // 1 if cannot swap ortho <-> triclinic
   int time_integrate;            // 1 if fix performs time integration, 0 if no
@@ -51,7 +52,9 @@ class Fix : protected Pointers {
   int dynamic_group_allow;       // 1 if can be used with dynamic group, else 0
   int dof_flag;                  // 1 if has dof() method (not min_dof())
   int special_alter_flag;        // 1 if has special_alter() meth for spec lists
-  int cudable_comm;              // 1 if fix has CUDA-enabled communication
+  int enforce2d_flag;            // 1 if has enforce2d method
+  int respa_level_support;       // 1 if fix supports fix_modify respa
+  int respa_level;               // which respa level to apply fix (1-Nrespa)
 
   int scalar_flag;               // 0/1 if compute_scalar() function exists
   int vector_flag;               // 0/1 if compute_vector() function exists
@@ -87,7 +90,7 @@ class Fix : protected Pointers {
   int comm_border;               // size of border communication (0 if none)
 
   double virial[6];              // accumlated virial
-  double **vatom;                // accumulated per-atom virial
+  double *eatom,**vatom;         // accumulated per-atom energy/virial
 
   int restart_reset;             // 1 if restart just re-initialized fix
 
@@ -120,6 +123,7 @@ class Fix : protected Pointers {
   virtual void pre_exchange() {}
   virtual void pre_neighbor() {}
   virtual void pre_force(int) {}
+  virtual void pre_reverse(int,int) {}
   virtual void post_force(int) {}
   virtual void final_integrate() {}
   virtual void end_of_step() {}
@@ -133,6 +137,7 @@ class Fix : protected Pointers {
   virtual void set_arrays(int) {}
   virtual void update_arrays(int, int) {}
   virtual void set_molecule(int, tagint, int, double *, double *, double *) {}
+  virtual void clear_bonus() {}
 
   virtual int pack_border(int, int *, double *) {return 0;}
   virtual int unpack_border(int, int, double *) {return 0;}
@@ -170,6 +175,7 @@ class Fix : protected Pointers {
 
   virtual int pack_forward_comm(int, int *, double *, int, int *) {return 0;}
   virtual void unpack_forward_comm(int, int, double *) {}
+  virtual int pack_reverse_comm_size(int, int) {return 0;}
   virtual int pack_reverse_comm(int, int, double *) {return 0;}
   virtual void unpack_reverse_comm(int, int *, double *) {}
 
@@ -181,6 +187,7 @@ class Fix : protected Pointers {
   virtual void deform(int) {}
   virtual void reset_target(double) {}
   virtual void reset_dt() {}
+  virtual void enforce2d() {}
 
   virtual void read_data_header(char *) {}
   virtual void read_data_section(char *, int, char *, tagint) {}
@@ -197,6 +204,8 @@ class Fix : protected Pointers {
 
   virtual void rebuild_special() {}
 
+  virtual int image(int *&, double **&) {return 0;}
+
   virtual int modify_param(int, char **) {return 0;}
   virtual void *extract(const char *, int &) {return NULL;}
 
@@ -209,12 +218,15 @@ class Fix : protected Pointers {
   int instance_me;        // which Fix class instantiation I am
 
   int evflag;
-  int vflag_global,vflag_atom;
-  int maxvatom;
+  int eflag_either,eflag_global,eflag_atom;
+  int vflag_either,vflag_global,vflag_atom;
+  int maxeatom,maxvatom;
 
   int copymode;   // if set, do not deallocate during destruction
                   // required when classes are used as functors by Kokkos
 
+  void ev_setup(int, int);
+  void ev_tally(int, int *, double, double, double *);
   void v_setup(int);
   void v_tally(int, int *, double, double *);
 
@@ -251,7 +263,8 @@ namespace FixConst {
   static const int MIN_POST_FORCE =          1<<17;
   static const int MIN_ENERGY =              1<<18;
   static const int POST_RUN =                1<<19;
-  static const int FIX_CONST_LAST =          1<<20;
+  static const int PRE_REVERSE =             1<<20;
+  static const int FIX_CONST_LAST =          1<<21;
 }
 
 }

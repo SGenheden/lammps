@@ -1,13 +1,13 @@
 /*
 //@HEADER
 // ************************************************************************
-// 
+//
 //                        Kokkos v. 2.0
 //              Copyright (2014) Sandia Corporation
-// 
+//
 // Under the terms of Contract DE-AC04-94AL85000 with Sandia Corporation,
 // the U.S. Government retains certain rights in this software.
-// 
+//
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -36,7 +36,7 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
 // Questions? Contact  H. Carter Edwards (hcedwar@sandia.gov)
-// 
+//
 // ************************************************************************
 //@HEADER
 */
@@ -204,7 +204,7 @@ T AddLoopSerial(int loop) {
   *data+=(T)1;
 
   T val = *data;
-  delete data;
+  delete [] data;
   return val;
 }
 
@@ -266,7 +266,7 @@ T CASLoopSerial(int loop) {
   }
 
   T val = *data;
-  delete data;
+  delete [] data;
   return val;
 }
 
@@ -312,7 +312,7 @@ T ExchLoop(int loop) {
 }
 
 template<class T>
-T ExchLoopSerial(int loop) {
+T ExchLoopSerial(typename std::conditional<!std::is_same<T,Kokkos::complex<double> >::value,int,void>::type loop) {
   T* data = new T[1];
   T* data2 = new T[1];
   data[0] = 0;
@@ -324,8 +324,27 @@ T ExchLoopSerial(int loop) {
   }
 
   T val = *data2 + *data;
-  delete data;
-  delete data2;
+  delete [] data;
+  delete [] data2;
+  return val;
+}
+
+template<class T>
+T ExchLoopSerial(typename std::conditional<std::is_same<T,Kokkos::complex<double> >::value,int,void>::type loop) {
+  T* data = new T[1];
+  T* data2 = new T[1];
+  data[0] = 0;
+  data2[0] = 0;
+  for(int i=0;i<loop;i++) {
+  T old = *data;
+  data->real() = (static_cast<double>(i));
+  data->imag() = 0;
+  *data2+=old;
+  }
+
+  T val = *data2 + *data;
+  delete [] data;
+  delete [] data2;
   return val;
 }
 

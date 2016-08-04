@@ -15,10 +15,10 @@
    Contributing author: Stan Moore (SNL)
 ------------------------------------------------------------------------- */
 
-#include "math.h"
-#include "stdio.h"
-#include "stdlib.h"
-#include "string.h"
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include "pair_sw_kokkos.h"
 #include "kokkos.h"
 #include "pair_kokkos.h"
@@ -33,8 +33,10 @@
 #include "memory.h"
 #include "error.h"
 #include "atom_masks.h"
+#include "math_const.h"
 
 using namespace LAMMPS_NS;
+using namespace MathConst;
 
 #define MAXLINE 1024
 #define DELTA 4
@@ -44,8 +46,6 @@ using namespace LAMMPS_NS;
 template<class DeviceType>
 PairSWKokkos<DeviceType>::PairSWKokkos(LAMMPS *lmp) : PairSW(lmp)
 {
-  THIRD = 1.0/3.0;
-
   respa_enable = 0;
 
 
@@ -128,28 +128,24 @@ void PairSWKokkos<DeviceType>::compute(int eflag_in, int vflag_in)
       Kokkos::parallel_reduce(Kokkos::RangePolicy<DeviceType, TagPairSWComputeHalf<HALF,1> >(0,inum),*this,ev);
     else
       Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType, TagPairSWComputeHalf<HALF,0> >(0,inum),*this);
-    DeviceType::fence();
     ev_all += ev;
   } else if (neighflag == HALFTHREAD) {
     if (evflag)
       Kokkos::parallel_reduce(Kokkos::RangePolicy<DeviceType, TagPairSWComputeHalf<HALFTHREAD,1> >(0,inum),*this,ev);
     else
       Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType, TagPairSWComputeHalf<HALFTHREAD,0> >(0,inum),*this);
-    DeviceType::fence();
     ev_all += ev;
   } else if (neighflag == FULL) {
     if (evflag)
       Kokkos::parallel_reduce(Kokkos::RangePolicy<DeviceType, TagPairSWComputeFullA<FULL,1> >(0,inum),*this,ev);
     else
       Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType, TagPairSWComputeFullA<FULL,0> >(0,inum),*this);
-    DeviceType::fence();
     ev_all += ev;
-    
+
     if (evflag)
       Kokkos::parallel_reduce(Kokkos::RangePolicy<DeviceType, TagPairSWComputeFullB<FULL,1> >(0,ignum),*this,ev);
     else
       Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType, TagPairSWComputeFullB<FULL,0> >(0,ignum),*this);
-    DeviceType::fence();
     ev_all += ev;
   }
 
@@ -229,7 +225,7 @@ void PairSWKokkos<DeviceType>::operator()(TagPairSWComputeHalf<NEIGHFLAG,EVFLAG>
     const F_FLOAT rsq = delx*delx + dely*dely + delz*delz;
 
     const int ijparam = d_elem2param(itype,jtype,jtype);
-    if (rsq > d_params[ijparam].cutsq) continue;
+    if (rsq >= d_params[ijparam].cutsq) continue;
 
     twobody(d_params[ijparam],rsq,fpair,eflag,evdwl);
 
@@ -257,7 +253,7 @@ void PairSWKokkos<DeviceType>::operator()(TagPairSWComputeHalf<NEIGHFLAG,EVFLAG>
     delr1[1] = x(j,1) - ytmp;
     delr1[2] = x(j,2) - ztmp;
     const F_FLOAT rsq1 = delr1[0]*delr1[0] + delr1[1]*delr1[1] + delr1[2]*delr1[2];
-    if (rsq1 > d_params[ijparam].cutsq) continue;
+    if (rsq1 >= d_params[ijparam].cutsq) continue;
 
     F_FLOAT fxtmpj = 0.0;
     F_FLOAT fytmpj = 0.0;
@@ -275,7 +271,7 @@ void PairSWKokkos<DeviceType>::operator()(TagPairSWComputeHalf<NEIGHFLAG,EVFLAG>
       delr2[2] = x(k,2) - ztmp;
       const F_FLOAT rsq2 = delr2[0]*delr2[0] + delr2[1]*delr2[1] + delr2[2]*delr2[2];
 
-      if (rsq2 > d_params[ikparam].cutsq) continue;
+      if (rsq2 >= d_params[ikparam].cutsq) continue;
 
       threebody(d_params[ijparam],d_params[ikparam],d_params[ijkparam],
                 rsq1,rsq2,delr1,delr2,fj,fk,eflag,evdwl);
@@ -355,7 +351,7 @@ void PairSWKokkos<DeviceType>::operator()(TagPairSWComputeFullA<NEIGHFLAG,EVFLAG
 
     const int ijparam = d_elem2param(itype,jtype,jtype);
 
-    if (rsq > d_params[ijparam].cutsq) continue;
+    if (rsq >= d_params[ijparam].cutsq) continue;
 
     twobody(d_params[ijparam],rsq,fpair,eflag,evdwl);
 
@@ -381,7 +377,7 @@ void PairSWKokkos<DeviceType>::operator()(TagPairSWComputeFullA<NEIGHFLAG,EVFLAG
     delr1[2] = x(j,2) - ztmp;
     const F_FLOAT rsq1 = delr1[0]*delr1[0] + delr1[1]*delr1[1] + delr1[2]*delr1[2];
 
-    if (rsq1 > d_params[ijparam].cutsq) continue;
+    if (rsq1 >= d_params[ijparam].cutsq) continue;
 
     for (int kk = jj+1; kk < jnum; kk++) {
       int k = d_neighbors(i,kk);
@@ -395,7 +391,7 @@ void PairSWKokkos<DeviceType>::operator()(TagPairSWComputeFullA<NEIGHFLAG,EVFLAG
       delr2[2] = x(k,2) - ztmp;
       const F_FLOAT rsq2 = delr2[0]*delr2[0] + delr2[1]*delr2[1] + delr2[2]*delr2[2];
 
-      if (rsq2 > d_params[ikparam].cutsq) continue;
+      if (rsq2 >= d_params[ikparam].cutsq) continue;
 
       threebody(d_params[ijparam],d_params[ikparam],d_params[ijkparam],
                 rsq1,rsq2,delr1,delr2,fj,fk,eflag,evdwl);
@@ -463,7 +459,7 @@ void PairSWKokkos<DeviceType>::operator()(TagPairSWComputeFullB<NEIGHFLAG,EVFLAG
     delr1[2] = ztmpi - ztmpj;
     const F_FLOAT rsq1 = delr1[0]*delr1[0] + delr1[1]*delr1[1] + delr1[2]*delr1[2];
 
-    if (rsq1 > d_params[jiparam].cutsq) continue;
+    if (rsq1 >= d_params[jiparam].cutsq) continue;
 
     const int j_jnum = d_numneigh[j];
 
@@ -480,7 +476,7 @@ void PairSWKokkos<DeviceType>::operator()(TagPairSWComputeFullB<NEIGHFLAG,EVFLAG
       delr2[2] = x(k,2) - ztmpj;
       const F_FLOAT rsq2 = delr2[0]*delr2[0] + delr2[1]*delr2[1] + delr2[2]*delr2[2];
 
-      if (rsq2 > d_params[jkparam].cutsq) continue;
+      if (rsq2 >= d_params[jkparam].cutsq) continue;
 
       if (vflag_atom)
         threebody(d_params[jiparam],d_params[jkparam],d_params[jikparam],
@@ -574,9 +570,9 @@ void PairSWKokkos<DeviceType>::init_style()
 /* ---------------------------------------------------------------------- */
 
 template<class DeviceType>
-void PairSWKokkos<DeviceType>::setup()
+void PairSWKokkos<DeviceType>::setup_params()
 {
-  PairSW::setup();
+  PairSW::setup_params();
 
   // sync elem2param and params
 
@@ -902,7 +898,10 @@ void PairSWKokkos<DeviceType>::ev_tally3_atom(EV_FLOAT &ev, const int &i,
   }
 }
 
+namespace LAMMPS_NS {
 template class PairSWKokkos<LMPDeviceType>;
 #ifdef KOKKOS_HAVE_CUDA
 template class PairSWKokkos<LMPHostType>;
 #endif
+}
+

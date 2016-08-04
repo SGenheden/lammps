@@ -102,7 +102,7 @@ class PairCoulDebyeKokkos : public PairCoulDebye {
   typename ArrayTypes<DeviceType>::tdual_ffloat_2d k_cut_coulsq;
   typename ArrayTypes<DeviceType>::t_ffloat_2d d_cut_coulsq;
 
-  
+
   int neighflag;
   int nlocal,nall,eflag,vflag;
 
@@ -131,5 +131,19 @@ class PairCoulDebyeKokkos : public PairCoulDebye {
 #endif
 
 /* ERROR/WARNING messages:
+
+E: Illegal ... command
+
+Self-explanatory.  Check the input script syntax and compare to the
+documentation for the command.  You can use -echo screen as a
+command-line option when running LAMMPS to see the offending line.
+
+E: Cannot use Kokkos pair style with rRESPA inner/middle
+
+Self-explanatory.
+
+E: Cannot use chosen neighbor list style with coul/debye/kk
+
+Self-explanatory.
 
 */

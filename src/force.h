@@ -15,7 +15,7 @@
 #define LMP_FORCE_H
 
 #include "pointers.h"
-#include "stdio.h"
+#include <stdio.h>
 #include <map>
 #include <string>
 
@@ -77,10 +77,12 @@ class Force : protected Pointers {
   Force(class LAMMPS *);
   ~Force();
   void init();
+  void setup();
 
   void create_pair(const char *, int);
   class Pair *new_pair(const char *, int, int &);
-  class Pair *pair_match(const char *, int);
+  class Pair *pair_match(const char *, int, int nsub=0);
+  char *pair_match_ptr(Pair *);
 
   void create_bond(const char *, int);
   class Bond *new_bond(const char *, int, int &);
@@ -88,9 +90,11 @@ class Force : protected Pointers {
 
   void create_angle(const char *, int);
   class Angle *new_angle(const char *, int, int &);
+  class Angle *angle_match(const char *);
 
   void create_dihedral(const char *, int);
   class Dihedral *new_dihedral(const char *, int, int &);
+  class Dihedral *dihedral_match(const char *);
 
   void create_improper(const char *, int);
   class Improper *new_improper(const char *, int, int &);

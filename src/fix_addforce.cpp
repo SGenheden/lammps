@@ -11,8 +11,8 @@
    See the README file in the top-level LAMMPS directory.
 ------------------------------------------------------------------------- */
 
-#include "string.h"
-#include "stdlib.h"
+#include <string.h>
+#include <stdlib.h>
 #include "fix_addforce.h"
 #include "atom.h"
 #include "atom_masks.h"
@@ -47,6 +47,8 @@ FixAddForce::FixAddForce(LAMMPS *lmp, int narg, char **arg) :
   global_freq = 1;
   extscalar = 1;
   extvector = 1;
+  respa_level_support = 1;
+  ilevel_respa = 0;
 
   xstr = ystr = zstr = NULL;
 
@@ -112,7 +114,7 @@ FixAddForce::FixAddForce(LAMMPS *lmp, int narg, char **arg) :
   force_flag = 0;
   foriginal[0] = foriginal[1] = foriginal[2] = foriginal[3] = 0.0;
 
-  maxatom = atom->nmax;
+  maxatom = 1;
   memory->create(sforce,maxatom,4,"addforce:sforce");
 }
 
@@ -201,8 +203,13 @@ void FixAddForce::init()
       update->whichflag == 2 && estyle == NONE)
     error->all(FLERR,"Must use variable energy with fix addforce");
 
+  int max_respa = 0;
+
   if (strstr(update->integrate_style,"respa"))
-    nlevels_respa = ((Respa *) update->integrate)->nlevels;
+    max_respa = ((Respa *) update->integrate)->nlevels-1;
+
+  if (respa_level >= 0)
+    ilevel_respa = MIN(respa_level,max_respa);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -212,9 +219,9 @@ void FixAddForce::setup(int vflag)
   if (strstr(update->integrate_style,"verlet"))
     post_force(vflag);
   else {
-    ((Respa *) update->integrate)->copy_flevel_f(nlevels_respa-1);
-    post_force_respa(vflag,nlevels_respa-1,0);
-    ((Respa *) update->integrate)->copy_f_flevel(nlevels_respa-1);
+    ((Respa *) update->integrate)->copy_flevel_f(ilevel_respa);
+    post_force_respa(vflag,ilevel_respa,0);
+    ((Respa *) update->integrate)->copy_f_flevel(ilevel_respa);
   }
 }
 
@@ -251,7 +258,7 @@ void FixAddForce::post_force(int vflag)
 
   // reallocate sforce array if necessary
 
-  if ((varflag == ATOM || estyle == ATOM) && nlocal > maxatom) {
+  if ((varflag == ATOM || estyle == ATOM) && atom->nmax > maxatom) {
     maxatom = atom->nmax;
     memory->destroy(sforce);
     memory->create(sforce,maxatom,4,"addforce:sforce");
@@ -324,7 +331,7 @@ void FixAddForce::post_force(int vflag)
 
 void FixAddForce::post_force_respa(int vflag, int ilevel, int iloop)
 {
-  if (ilevel == nlevels_respa-1) post_force(vflag);
+  if (ilevel == ilevel_respa) post_force(vflag);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -371,6 +378,6 @@ double FixAddForce::compute_vector(int n)
 double FixAddForce::memory_usage()
 {
   double bytes = 0.0;
-  if (varflag == ATOM) bytes = atom->nmax*4 * sizeof(double);
+  if (varflag == ATOM) bytes = maxatom*4 * sizeof(double);
   return bytes;
 }

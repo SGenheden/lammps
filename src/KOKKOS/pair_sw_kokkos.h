@@ -83,12 +83,12 @@ class PairSWKokkos : public PairSW {
 
   template<int NEIGHFLAG>
   KOKKOS_INLINE_FUNCTION
-  void ev_tally3(EV_FLOAT &ev, const int &i, const int &j, int &k, 
+  void ev_tally3(EV_FLOAT &ev, const int &i, const int &j, int &k,
             const F_FLOAT &evdwl, const F_FLOAT &ecoul,
                        F_FLOAT *fj, F_FLOAT *fk, F_FLOAT *drji, F_FLOAT *drki) const;
 
   KOKKOS_INLINE_FUNCTION
-  void ev_tally3_atom(EV_FLOAT &ev, const int &i, 
+  void ev_tally3_atom(EV_FLOAT &ev, const int &i,
             const F_FLOAT &evdwl, const F_FLOAT &ecoul,
                        F_FLOAT *fj, F_FLOAT *fk, F_FLOAT *drji, F_FLOAT *drki) const;
 
@@ -106,7 +106,7 @@ class PairSWKokkos : public PairSW {
 
   t_param_1d d_params;
 
-  virtual void setup();
+  virtual void setup_params();
   void twobody(const Param&, const F_FLOAT&, F_FLOAT&, const int&, F_FLOAT&) const;
   void threebody(const Param&, const Param&, const Param&, const F_FLOAT&, const F_FLOAT&, F_FLOAT *, F_FLOAT *,
                  F_FLOAT *, F_FLOAT *, const int&, F_FLOAT&) const;
@@ -146,5 +146,9 @@ class PairSWKokkos : public PairSW {
 #endif
 
 /* ERROR/WARNING messages:
+
+E: Cannot use chosen neighbor list style with pair sw/kk
+
+Self-explanatory.
 
 */

@@ -128,6 +128,8 @@ public:
   //! This memory space preferred device_type
   typedef Kokkos::Device<execution_space,memory_space> device_type;
 
+  /*--------------------------------*/
+#if ! KOKKOS_USING_EXP_VIEW
 
 #if defined( KOKKOS_USE_PAGE_ALIGNED_HOST_MEMORY )
   typedef Impl::PageAlignedAllocator allocator ;
@@ -143,6 +145,8 @@ public:
    */
   static Impl::AllocationTracker allocate_and_track( const std::string & label, const size_t size );
 
+#endif /* #if ! KOKKOS_USING_EXP_VIEW */
+
   /*--------------------------------*/
   /* Functions unique to the HostSpace */
   static int in_parallel();
@@ -153,7 +157,9 @@ public:
 
   /**\brief  Default memory space instance */
   HostSpace();
+  HostSpace( HostSpace && rhs ) = default ;
   HostSpace( const HostSpace & rhs ) = default ;
+  HostSpace & operator = ( HostSpace && ) = default ;
   HostSpace & operator = ( const HostSpace & ) = default ;
   ~HostSpace() = default ;
 
@@ -164,10 +170,10 @@ public:
   explicit
   HostSpace( const AllocationMechanism & );
 
-  /**\brief  Allocate memory in the host space */
+  /**\brief  Allocate untracked memory in the space */
   void * allocate( const size_t arg_alloc_size ) const ;
 
-  /**\brief  Deallocate memory in the host space */
+  /**\brief  Deallocate untracked memory in the space */
   void deallocate( void * const arg_alloc_ptr 
                  , const size_t arg_alloc_size ) const ;
 
@@ -239,6 +245,21 @@ public:
 #endif
     }
 
+  /**\brief  Allocate tracked memory in the space */
+  static
+  void * allocate_tracked( const Kokkos::HostSpace & arg_space
+                         , const std::string & arg_label
+                         , const size_t arg_alloc_size );
+
+  /**\brief  Reallocate tracked memory in the space */
+  static
+  void * reallocate_tracked( void * const arg_alloc_ptr
+                           , const size_t arg_alloc_size );
+
+  /**\brief  Deallocate tracked memory in the space */
+  static
+  void deallocate_tracked( void * const arg_alloc_ptr );
+
 
   static SharedAllocationRecord * get_record( void * arg_alloc_ptr );
 
@@ -255,11 +276,17 @@ public:
 namespace Kokkos {
 namespace Impl {
 
-template< class , class > struct DeepCopy ;
+template< class DstSpace, class SrcSpace, class ExecutionSpace = typename DstSpace::execution_space> struct DeepCopy ;
 
-template<>
-struct DeepCopy<HostSpace,HostSpace> {
-  DeepCopy( void * dst , const void * src , size_t n );
+template<class ExecutionSpace>
+struct DeepCopy<HostSpace,HostSpace,ExecutionSpace> {
+  DeepCopy( void * dst , const void * src , size_t n ) {
+    memcpy( dst , src , n );
+  }
+  DeepCopy( const ExecutionSpace& exec, void * dst , const void * src , size_t n ) {
+    exec.fence();
+    memcpy( dst , src , n );
+  }
 };
 
 } // namespace Impl

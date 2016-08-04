@@ -102,7 +102,7 @@ class PairLJCutCoulLongKokkos : public PairLJCutCoulLong {
   typename ArrayTypes<DeviceType>::t_ffloat_1d_randomread
     d_rtable, d_drtable, d_ftable, d_dftable,
     d_ctable, d_dctable, d_etable, d_detable;
-  
+
   int neighflag;
   int nlocal,nall,eflag,vflag;
 
@@ -152,7 +152,7 @@ command-line option when running LAMMPS to see the offending line.
 
 E: Cannot use Kokkos pair style with rRESPA inner/middle
 
-rRESPA inner/middle options are not yet supported by Kokkos.
+Self-explanatory.
 
 E: Cannot use chosen neighbor list style with lj/cut/coul/long/kk
 

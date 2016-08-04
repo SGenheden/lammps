@@ -11,9 +11,9 @@
    See the README file in the top-level LAMMPS directory.
 ------------------------------------------------------------------------- */
 
-#include "math.h"
-#include "stdlib.h"
-#include "string.h"
+#include <math.h>
+#include <stdlib.h>
+#include <string.h>
 #include "fix_wall.h"
 #include "atom.h"
 #include "input.h"
@@ -42,6 +42,8 @@ FixWall::FixWall(LAMMPS *lmp, int narg, char **arg) :
   global_freq = 1;
   extscalar = 1;
   extvector = 1;
+  respa_level_support = 1;
+  ilevel_respa = 0;
 
   // parse args
 
@@ -227,8 +229,6 @@ int FixWall::setmask()
 
 void FixWall::init()
 {
-  dt = update->dt;
-
   for (int m = 0; m < nwall; m++) {
     if (xstyle[m] == VARIABLE) {
       xindex[m] = input->variable->find(xstr[m]);
@@ -257,8 +257,10 @@ void FixWall::init()
 
   for (int m = 0; m < nwall; m++) precompute(m);
 
-  if (strstr(update->integrate_style,"respa"))
-    nlevels_respa = ((Respa *) update->integrate)->nlevels;
+  if (strstr(update->integrate_style,"respa")) {
+    ilevel_respa = ((Respa *) update->integrate)->nlevels-1;
+    if (respa_level >= 0) ilevel_respa = MIN(respa_level,ilevel_respa);
+  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -268,9 +270,9 @@ void FixWall::setup(int vflag)
   if (strstr(update->integrate_style,"verlet")) {
     if (!fldflag) post_force(vflag);
   } else {
-    ((Respa *) update->integrate)->copy_flevel_f(nlevels_respa-1);
-    post_force_respa(vflag,nlevels_respa-1,0);
-    ((Respa *) update->integrate)->copy_f_flevel(nlevels_respa-1);
+    ((Respa *) update->integrate)->copy_flevel_f(ilevel_respa);
+    post_force_respa(vflag,ilevel_respa,0);
+    ((Respa *) update->integrate)->copy_f_flevel(ilevel_respa);
   }
 }
 
@@ -319,7 +321,7 @@ void FixWall::post_force(int vflag)
       }
       if (sstyle[m] == VARIABLE) {
         sigma[m] = input->variable->compute_equal(sindex[m]);
-        if (sigma[m] < 0.0) 
+        if (sigma[m] < 0.0)
           error->all(FLERR,"Variable evaluation in fix wall gave bad value");
       }
       precompute(m);
@@ -335,7 +337,7 @@ void FixWall::post_force(int vflag)
 
 void FixWall::post_force_respa(int vflag, int ilevel, int iloop)
 {
-  if (ilevel == nlevels_respa-1) post_force(vflag);
+  if (ilevel == ilevel_respa) post_force(vflag);
 }
 
 /* ---------------------------------------------------------------------- */

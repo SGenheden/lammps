@@ -11,9 +11,9 @@
    See the README file in the top-level LAMMPS directory.
 ------------------------------------------------------------------------- */
 
-#include "stdio.h"
-#include "stdlib.h"
-#include "string.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include "output.h"
 #include "style_dump.h"
 #include "atom.h"
@@ -30,7 +30,6 @@
 #include "force.h"
 #include "dump.h"
 #include "write_restart.h"
-#include "accelerator_cuda.h"
 #include "memory.h"
 #include "error.h"
 
@@ -290,11 +289,8 @@ void Output::write(bigint ntimestep)
 {
   // next_dump does not force output on last step of run
   // wrap dumps that invoke computes or eval of variable with clear/add
-  // download data from GPU if necessary
 
   if (next_dump_any == ntimestep) {
-    if (lmp->cuda && !lmp->cuda->oncpu) lmp->cuda->downloadAll();
-
     for (int idump = 0; idump < ndump; idump++) {
       if (next_dump[idump] == ntimestep) {
         if (dump[idump]->clearstep || every_dump[idump] == 0)
@@ -321,12 +317,9 @@ void Output::write(bigint ntimestep)
 
   // next_restart does not force output on last step of run
   // for toggle = 0, replace "*" with current timestep in restart filename
-  // download data from GPU if necessary
   // eval of variable may invoke computes so wrap with clear/add
 
   if (next_restart == ntimestep) {
-    if (lmp->cuda && !lmp->cuda->oncpu) lmp->cuda->downloadAll();
-
     if (next_restart_single == ntimestep) {
       char *file = new char[strlen(restart1) + 16];
       char *ptr = strchr(restart1,'*');
@@ -456,6 +449,14 @@ void Output::reset_timestep(bigint ntimestep)
       next_dump[idump] = (ntimestep/every_dump[idump])*every_dump[idump];
       if (next_dump[idump] < ntimestep) next_dump[idump] += every_dump[idump];
     } else {
+      // ivar_dump may not be initialized
+      if (ivar_dump[idump] < 0) {
+        ivar_dump[idump] = input->variable->find(var_dump[idump]);
+        if (ivar_dump[idump] < 0)
+          error->all(FLERR,"Variable name for dump every does not exist");
+        if (!input->variable->equalstyle(ivar_dump[idump]))
+          error->all(FLERR,"Variable for dump every is invalid style");
+      }
       modify->clearstep_compute();
       update->ntimestep--;
       bigint nextdump = static_cast<bigint>
@@ -544,7 +545,7 @@ void Output::add_dump(int narg, char **arg)
       error->all(FLERR,"Reuse of dump ID");
   int igroup = group->find(arg[1]);
   if (igroup == -1) error->all(FLERR,"Could not find dump group ID");
-  if (force->inumeric(FLERR,arg[3]) <= 0) 
+  if (force->inumeric(FLERR,arg[3]) <= 0)
     error->all(FLERR,"Invalid dump frequency");
 
   // extend Dump list if necessary
@@ -560,6 +561,13 @@ void Output::add_dump(int narg, char **arg)
       memory->srealloc(var_dump,max_dump*sizeof(char *),"output:var_dump");
     memory->grow(ivar_dump,max_dump,"output:ivar_dump");
   }
+
+  // initialize per-dump data to suitable default values
+
+  every_dump[ndump] = 0;
+  last_dump[ndump] = -1;
+  var_dump[ndump] = NULL;
+  ivar_dump[ndump] = -1;
 
   // create the Dump
 
@@ -756,7 +764,7 @@ void Output::create_restart(int narg, char **arg)
   if (strchr(arg[1],'%')) multiproc = comm->nprocs;
   else multiproc = 0;
   if (nfile == 2) {
-    if (multiproc && !strchr(arg[2],'%')) 
+    if (multiproc && !strchr(arg[2],'%'))
       error->all(FLERR,"Both restart files must use % or neither");
     if (!multiproc && strchr(arg[2],'%'))
       error->all(FLERR,"Both restart files must use % or neither");
@@ -766,7 +774,7 @@ void Output::create_restart(int narg, char **arg)
   if (strstr(arg[1],".mpi")) mpiioflag = 1;
   else mpiioflag = 0;
   if (nfile == 2) {
-    if (mpiioflag && !strstr(arg[2],".mpi")) 
+    if (mpiioflag && !strstr(arg[2],".mpi"))
       error->all(FLERR,"Both restart files must use MPI-IO or neither");
     if (!mpiioflag && strstr(arg[2],".mpi"))
       error->all(FLERR,"Both restart files must use MPI-IO or neither");

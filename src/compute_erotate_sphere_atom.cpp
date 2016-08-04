@@ -11,7 +11,7 @@
    See the README file in the top-level LAMMPS directory.
 ------------------------------------------------------------------------- */
 
-#include "string.h"
+#include <string.h>
 #include "compute_erotate_sphere_atom.h"
 #include "atom.h"
 #include "update.h"
@@ -31,7 +31,7 @@ ComputeErotateSphereAtom::
 ComputeErotateSphereAtom(LAMMPS *lmp, int narg, char **arg) :
   Compute(lmp, narg, arg)
 {
-  if (narg != 3) 
+  if (narg != 3)
     error->all(FLERR,"Illegal compute erotate/sphere//atom command");
 
   peratom_flag = 1;
@@ -74,7 +74,7 @@ void ComputeErotateSphereAtom::compute_peratom()
 
   // grow erot array if necessary
 
-  if (atom->nlocal > nmax) {
+  if (atom->nmax > nmax) {
     memory->destroy(erot);
     nmax = atom->nmax;
     memory->create(erot,nmax,"erotate/sphere/atom:erot");

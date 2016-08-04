@@ -11,9 +11,9 @@
    See the README file in the top-level LAMMPS directory.
 ------------------------------------------------------------------------- */
 
-#include "mpi.h"
-#include "string.h"
-#include "stdlib.h"
+#include <mpi.h>
+#include <string.h>
+#include <stdlib.h>
 #include "dump_local.h"
 #include "atom.h"
 #include "modify.h"
@@ -43,6 +43,8 @@ DumpLocal::DumpLocal(LAMMPS *lmp, int narg, char **arg) :
   clearstep = 1;
 
   nevery = force->inumeric(FLERR,arg[3]);
+  if (nevery <= 0) error->all(FLERR,"Illegal dump local command");
+
 
   size_one = nfield = narg-5;
   pack_choice = new FnPtrPack[nfield];
@@ -298,9 +300,9 @@ int DumpLocal::convert_string(int n, double *mybuf)
     }
 
     for (j = 0; j < size_one; j++) {
-      if (vtype[j] == INT) 
+      if (vtype[j] == INT)
         offset += sprintf(&sbuf[offset],vformat[j],static_cast<int> (mybuf[m]));
-      else 
+      else
         offset += sprintf(&sbuf[offset],vformat[j],mybuf[m]);
       m++;
     }

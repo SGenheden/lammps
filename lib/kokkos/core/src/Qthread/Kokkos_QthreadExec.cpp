@@ -102,6 +102,21 @@ const void               * volatile s_active_function_arg = 0 ;
 
 namespace Kokkos {
 
+int Qthread::is_initialized()
+{
+  Impl::s_number_workers != 0 ;
+}
+
+int Qthread::concurrency()
+{
+  return Impl::s_number_workers_per_shepherd ;
+}
+
+int Qthread::in_parallel()
+{
+  return Impl::s_active_function != 0 ;
+}
+
 void Qthread::initialize( int thread_count )
 {
   // Environment variable: QTHREAD_NUM_SHEPHERDS
@@ -466,8 +481,20 @@ namespace Impl {
 QthreadTeamPolicyMember::QthreadTeamPolicyMember()
   : m_exec( **worker_exec() )
   , m_team_shared(0,0)
-  , m_team_size( 1 ) // s_number_workers_per_shepherd )
-  , m_team_rank( 0 ) // m_exec.shepherd_worker_rank() )
+  , m_team_size( 1 )
+  , m_team_rank( 0 )
+  , m_league_size(1)
+  , m_league_end(1)
+  , m_league_rank(0)
+{
+  m_exec.shared_reset( m_team_shared );
+}
+
+QthreadTeamPolicyMember::QthreadTeamPolicyMember( const QthreadTeamPolicyMember::TaskTeam & )
+  : m_exec( **worker_exec() )
+  , m_team_shared(0,0)
+  , m_team_size( s_number_workers_per_shepherd )
+  , m_team_rank( m_exec.shepherd_worker_rank() )
   , m_league_size(1)
   , m_league_end(1)
   , m_league_rank(0)
