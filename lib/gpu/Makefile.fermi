@@ -1,5 +1,5 @@
-NVCC  = $(CUDA_HOME)/bin/nvcc
-EXTRAMAKE = Makefile.lammps.standard
+NVCC  = $(CUDA_HOME)/bin/nvcc #-ccbin /opt/gcc-34/bin
+EXTRAMAKE = Makefile.lammps.cuda
 
 CUDA_ARCH = -arch=sm_35
 CUDA_PRECISION = -D_SINGLE_DOUBLE

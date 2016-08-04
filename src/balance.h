@@ -32,10 +32,12 @@ class Balance : protected Pointers {
   Balance(class LAMMPS *);
   ~Balance();
   void command(int, char **);
+  int group_setup(int, char **);
   void shift_setup(char *, int, double);
   int shift();
   int *bisection(int sortflag = 0);
   double imbalance_nlocal(int &);
+  double imbalance_clock(double, double);
   void dumpout(bigint, FILE *);
 
  private:
@@ -65,6 +67,12 @@ class Balance : protected Pointers {
   int *proccount;            // particle count per processor
   int *allproccount;
 
+  int    ngroup;             // number of groups weights
+  int    *group_id;          // group ids for weights
+  double *group_weight;      // weights of groups
+
+  double *clock_imbalance;   // computed wall clock imbalance, NULL if not available
+
   int outflag;               // for output of balance results to file
   FILE *fp;
   int firststep;
@@ -74,6 +82,7 @@ class Balance : protected Pointers {
   void tally(int, int, double *);
   int adjust(int, double *);
   int binary(double, int, double *);
+  double getcost(int);
 #ifdef BALANCE_DEBUG
   void debug_shift_output(int, int, int, double *);
 #endif

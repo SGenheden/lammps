@@ -191,7 +191,7 @@ in the pair section of "this page"_Section_commands.html#cmd_5.
 "pair_style peri/pmb"_pair_peri.html - peridynamic PMB potential
 "pair_style peri/ves"_pair_peri.html - peridynamic VES potential
 "pair_style polymorphic"_pair_polymorphic.html - polymorphic 3-body potential
-"pair_style reax"_pair_reax.html - ReaxFF potential
+"pair_style reax/c"_pair_reax_c.html - ReaxFF potential
 "pair_style rebo"_pair_airebo.html - 2nd generation REBO potential of Brenner
 "pair_style resquared"_pair_resquared.html - Everaers RE-Squared ellipsoidal potential
 "pair_style snap"_pair_snap.html - SNAP quantum-accurate potential
@@ -204,7 +204,7 @@ in the pair section of "this page"_Section_commands.html#cmd_5.
 "pair_style tip4p/cut"_pair_coul.html - Coulomb for TIP4P water w/out LJ
 "pair_style tip4p/long"_pair_coul.html - long-range Coulombics for TIP4P water w/out LJ
 "pair_style tri/lj"_pair_tri_lj.html - LJ potential between triangles
-"pair_style vashishta"_pair_vashishta.html - Vashishta 2-body and 3-body potential 
+"pair_style vashishta"_pair_vashishta.html - Vashishta 2-body and 3-body potential
 "pair_style yukawa"_pair_yukawa.html - Yukawa potential
 "pair_style yukawa/colloid"_pair_yukawa_colloid.html - screened Yukawa potential for finite-size particles
 "pair_style zbl"_pair_zbl.html - Ziegler-Biersack-Littmark potential :ul

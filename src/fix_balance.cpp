@@ -73,11 +73,17 @@ FixBalance::FixBalance(LAMMPS *lmp, int narg, char **arg) :
     iarg++;
   }
 
+  // create instance of Balance class. required for processing group flags.
+
+  balance = new Balance(lmp);
+
   // optional args
 
   outflag = 0;
   int outarg = 0;
   fp = NULL;
+  last_clock = 0.0;
+  clock_factor = -1.0;
 
   while (iarg < narg) {
     if (strcmp(arg[iarg],"out") == 0) {
@@ -85,6 +91,15 @@ FixBalance::FixBalance(LAMMPS *lmp, int narg, char **arg) :
       outflag = 1;
       outarg = iarg+1;
       iarg += 2;
+    } else if (strcmp(arg[iarg],"clock") == 0) {
+      if (iarg+2 > narg) error->all(FLERR,"Illegal fix balance command");
+      clock_factor = force->numeric(FLERR,arg[iarg+1]);
+      if (clock_factor < 0.0 || clock_factor > 1.0)
+        error->all(FLERR,"Illegal fix balance command");
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"group") == 0) {
+      int ngroup = balance->group_setup(narg-iarg-1,arg+iarg+1);
+      iarg += 2 + 2*ngroup;
     } else error->all(FLERR,"Illegal fix balance command");
   }
 
@@ -106,10 +121,8 @@ FixBalance::FixBalance(LAMMPS *lmp, int narg, char **arg) :
   if (lbstyle == BISECTION && comm->style == 0)
     error->all(FLERR,"Fix balance rcb cannot be used with comm_style brick");
 
-  // create instance of Balance class
-  // if SHIFT, initialize it with params
+  // if SHIFT, initialize balance class with params
 
-  balance = new Balance(lmp);
   if (lbstyle == SHIFT) balance->shift_setup(bstr,nitermax,thresh);
 
   // create instance of Irregular class
@@ -188,6 +201,7 @@ void FixBalance::setup_pre_exchange()
 
   // perform a rebalance if threshhold exceeded
 
+  last_clock = 0.0;
   imbnow = balance->imbalance_nlocal(maxperproc);
   if (imbnow > thresh) rebalance();
 
@@ -216,6 +230,8 @@ void FixBalance::pre_exchange()
 
   // return if imbalance < threshhold
 
+  if (clock_factor > 0.0)
+    last_clock = balance->imbalance_clock(clock_factor,last_clock);
   imbnow = balance->imbalance_nlocal(maxperproc);
   if (imbnow <= thresh) {
     if (nevery) next_reneighbor = (update->ntimestep/nevery)*nevery + nevery;

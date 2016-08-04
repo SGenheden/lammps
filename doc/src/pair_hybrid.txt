@@ -72,8 +72,7 @@ pair_coeff command to assign parameters for the different type pairs.
 
 NOTE: There are two exceptions to this option to list an individual
 pair style multiple times.  The first is for pair styles implemented
-as Fortran libraries: "pair_style meam"_pair_meam.html and "pair_style
-reax"_pair_reax.html ("pair_style reax/c"_pair_reax_c.html is OK).
+as Fortran libraries: "pair_style meam"_pair_meam.html.
 This is because unlike a C++ class, they can not be instantiated
 multiple times, due to the manner in which they were coded in Fortran.
 The second is for GPU-enabled pair styles in the GPU package.  This is
@@ -104,7 +103,7 @@ following commands would model the Si atoms with Tersoff, the C atoms
 with Tersoff, and the cross-interactions with Lennard-Jones:
 
 pair_style hybrid lj/cut 2.5 tersoff tersoff
-pair_coeff * * tersoff 1 Si.tersoff Si NULL 
+pair_coeff * * tersoff 1 Si.tersoff Si NULL
 pair_coeff * * tersoff 2 C.tersoff NULL C
 pair_coeff 1 2 lj/cut 1.0 1.5 :pre
 
@@ -170,7 +169,7 @@ so that there is effectively no interaction (e.g. epsilon = 0.0 in a
 LJ potential).  Or, for {hybrid} and {hybrid/overlay} simulations, you
 can use this form of the pair_coeff command in your input script:
 
-pair_coeff	2 3 none :pre
+pair_coeff        2 3 none :pre
 
 or this form in the "Pair Coeffs" section of the data file:
 
