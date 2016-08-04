@@ -36,7 +36,7 @@ class FixTempBerendsen : public Fix {
   double compute_scalar();
   virtual void *extract(const char *, int &);
 
- protected:
+ private:
   int which;
   double t_start,t_stop,t_period,t_target;
   double energy;
