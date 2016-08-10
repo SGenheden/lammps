@@ -13,12 +13,13 @@
 
 /* ----------------------------------------------------------------------
    Contributing author: Paul Crozier (SNL)
+                        Samuel Genheden (Gothenburg University)
 ------------------------------------------------------------------------- */
 
-#include "math.h"
-#include "stdio.h"
-#include "stdlib.h"
-#include "string.h"
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include "pair_lj_charmm_coul_long_14.h"
 #include "atom.h"
 #include "comm.h"
@@ -53,7 +54,6 @@ PairLJCharmmCoulLong14::PairLJCharmmCoulLong14(LAMMPS *lmp) : PairLJCharmmCoulLo
   implicit = 0;
   mix_flag = ARITHMETIC;
   writedata = 1;
-  //allocated = 0;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -110,7 +110,7 @@ void PairLJCharmmCoulLong14::compute(int eflag, int vflag)
 
     for (jj = 0; jj < jnum; jj++) {
       jo = j = jlist[jj];
-      j &= NEIGHMASK; 
+      j &= NEIGHMASK;
       jtype = type[j];
       factor_lj = special_lj[sbmask(jo)];
       factor_coul = special_coul[sbmask(jo)];
@@ -118,7 +118,7 @@ void PairLJCharmmCoulLong14::compute(int eflag, int vflag)
         this_lj1 = lj14_1;
         this_lj2 = lj14_2;
         this_lj3 = lj14_3;
-        this_lj4 = lj14_4 ;        
+        this_lj4 = lj14_4;
         // if this is not true, then the 1-4 interaction are already pre-scaled
         if (!((lj3[itype][jtype]==lj14_3[itype][jtype])&&(lj4[itype][jtype]==lj14_4[itype][jtype])))
           factor_lj = 1.0;
@@ -128,7 +128,7 @@ void PairLJCharmmCoulLong14::compute(int eflag, int vflag)
         this_lj3 = lj3;
         this_lj4 = lj4;
       }
-      qtmp *= elescale[itype][jtype];     
+      qtmp *= elescale[itype][jtype];
 
       delx = xtmp - x[j][0];
       dely = ytmp - x[j][1];
@@ -165,13 +165,13 @@ void PairLJCharmmCoulLong14::compute(int eflag, int vflag)
         } else forcecoul = 0.0;
 
         if (rsq < cut_ljsq) {
-          r6inv = r2inv*r2inv*r2inv;          
+          r6inv = r2inv*r2inv*r2inv;
           forcelj = r6inv * (this_lj1[itype][jtype]*r6inv - this_lj2[itype][jtype]);
           if (rsq > cut_lj_innersq) {
             switch1 = (cut_ljsq-rsq) * (cut_ljsq-rsq) *
-              (cut_ljsq + 2.0*rsq - 3.0*cut_lj_innersq) / denom_lj;
+              (cut_ljsq + 2.0*rsq - 3.0*cut_lj_innersq) * denom_lj_inv;
             switch2 = 12.0*rsq * (cut_ljsq-rsq) *
-              (rsq-cut_lj_innersq) / denom_lj;
+              (rsq-cut_lj_innersq) * denom_lj_inv;
             philj = r6inv * (this_lj3[itype][jtype]*r6inv - this_lj4[itype][jtype]);
             forcelj = forcelj*switch1 + philj*switch2;
           }
@@ -203,7 +203,7 @@ void PairLJCharmmCoulLong14::compute(int eflag, int vflag)
             evdwl = r6inv*(this_lj3[itype][jtype]*r6inv-this_lj4[itype][jtype]);
             if (rsq > cut_lj_innersq) {
               switch1 = (cut_ljsq-rsq) * (cut_ljsq-rsq) *
-                (cut_ljsq + 2.0*rsq - 3.0*cut_lj_innersq) / denom_lj;
+                (cut_ljsq + 2.0*rsq - 3.0*cut_lj_innersq) * denom_lj_inv;
               evdwl *= switch1;
             }
             evdwl *= factor_lj;
@@ -245,13 +245,6 @@ void PairLJCharmmCoulLong14::compute_inner()
   numneigh = listinner->numneigh;
   firstneigh = listinner->firstneigh;
 
-  double cut_out_on = cut_respa[0];
-  double cut_out_off = cut_respa[1];
-
-  double cut_out_diff = cut_out_off - cut_out_on;
-  double cut_out_on_sq = cut_out_on*cut_out_on;
-  double cut_out_off_sq = cut_out_off*cut_out_off;
-
   // loop over neighbors of my atoms
 
   for (ii = 0; ii < inum; ii++) {
@@ -266,7 +259,7 @@ void PairLJCharmmCoulLong14::compute_inner()
 
     for (jj = 0; jj < jnum; jj++) {
       jo = j = jlist[jj];
-      j &= NEIGHMASK; 
+      j &= NEIGHMASK;
       jtype = type[j];
       factor_lj = special_lj[sbmask(jo)];
       factor_coul = special_coul[sbmask(jo)];
@@ -274,7 +267,7 @@ void PairLJCharmmCoulLong14::compute_inner()
         this_lj1 = lj14_1;
         this_lj2 = lj14_2;
         this_lj3 = lj14_3;
-        this_lj4 = lj14_4 ;        
+        this_lj4 = lj14_4 ;
         // if this is not true, then the 1-4 interaction are already pre-scaled
         if (!((lj3[itype][jtype]==lj14_3[itype][jtype])&&(lj4[itype][jtype]==lj14_4[itype][jtype])))
           factor_lj = 1.0;
@@ -296,13 +289,12 @@ void PairLJCharmmCoulLong14::compute_inner()
         if (factor_coul < 1.0) forcecoul -= (1.0-factor_coul)*forcecoul;
 
         r6inv = r2inv*r2inv*r2inv;
-        jtype = type[j];
         forcelj = r6inv * (this_lj1[itype][jtype]*r6inv - this_lj2[itype][jtype]);
 
         fpair = (forcecoul + factor_lj*forcelj) * r2inv;
 
         if (rsq > cut_out_on_sq) {
-          rsw = (sqrt(rsq) - cut_out_on)/cut_out_diff;
+          rsw = (sqrt(rsq) - cut_out_on)*cut_out_diff_inv;
           fpair *= 1.0 + rsw*rsw*(2.0*rsw-3.0);
         }
 
@@ -346,18 +338,6 @@ void PairLJCharmmCoulLong14::compute_middle()
   numneigh = listmiddle->numneigh;
   firstneigh = listmiddle->firstneigh;
 
-  double cut_in_off = cut_respa[0];
-  double cut_in_on = cut_respa[1];
-  double cut_out_on = cut_respa[2];
-  double cut_out_off = cut_respa[3];
-
-  double cut_in_diff = cut_in_on - cut_in_off;
-  double cut_out_diff = cut_out_off - cut_out_on;
-  double cut_in_off_sq = cut_in_off*cut_in_off;
-  double cut_in_on_sq = cut_in_on*cut_in_on;
-  double cut_out_on_sq = cut_out_on*cut_out_on;
-  double cut_out_off_sq = cut_out_off*cut_out_off;
-
   // loop over neighbors of my atoms
 
   for (ii = 0; ii < inum; ii++) {
@@ -373,7 +353,7 @@ void PairLJCharmmCoulLong14::compute_middle()
 
     for (jj = 0; jj < jnum; jj++) {
       jo = j = jlist[jj];
-      j &= NEIGHMASK; 
+      j &= NEIGHMASK;
       jtype = type[j];
       factor_lj = special_lj[sbmask(jo)];
       factor_coul = special_coul[sbmask(jo)];
@@ -381,7 +361,7 @@ void PairLJCharmmCoulLong14::compute_middle()
         this_lj1 = lj14_1;
         this_lj2 = lj14_2;
         this_lj3 = lj14_3;
-        this_lj4 = lj14_4 ;        
+        this_lj4 = lj14_4 ;
         // if this is not true, then the 1-4 interaction are already pre-scaled
         if (!((lj3[itype][jtype]==lj14_3[itype][jtype])&&(lj4[itype][jtype]==lj14_4[itype][jtype])))
           factor_lj = 1.0;
@@ -406,20 +386,20 @@ void PairLJCharmmCoulLong14::compute_middle()
         forcelj = r6inv * (this_lj1[itype][jtype]*r6inv - this_lj2[itype][jtype]);
         if (rsq > cut_lj_innersq) {
           switch1 = (cut_ljsq-rsq) * (cut_ljsq-rsq) *
-            (cut_ljsq + 2.0*rsq - 3.0*cut_lj_innersq) / denom_lj;
+            (cut_ljsq + 2.0*rsq - 3.0*cut_lj_innersq) * denom_lj_inv;
           switch2 = 12.0*rsq * (cut_ljsq-rsq) *
-            (rsq-cut_lj_innersq) / denom_lj;
+            (rsq-cut_lj_innersq) * denom_lj_inv;
           philj = r6inv * (this_lj3[itype][jtype]*r6inv - this_lj4[itype][jtype]);
           forcelj = forcelj*switch1 + philj*switch2;
         }
 
         fpair = (forcecoul + factor_lj*forcelj) * r2inv;
         if (rsq < cut_in_on_sq) {
-          rsw = (sqrt(rsq) - cut_in_off)/cut_in_diff;
+          rsw = (sqrt(rsq) - cut_in_off)*cut_in_diff_inv;
           fpair *= rsw*rsw*(3.0 - 2.0*rsw);
         }
         if (rsq > cut_out_on_sq) {
-          rsw = (sqrt(rsq) - cut_out_on)/cut_out_diff;
+          rsw = (sqrt(rsq) - cut_out_on)*cut_out_diff_inv;
           fpair *= 1.0 + rsw*rsw*(2.0*rsw - 3.0);
         }
 
@@ -470,13 +450,6 @@ void PairLJCharmmCoulLong14::compute_outer(int eflag, int vflag)
   numneigh = listouter->numneigh;
   firstneigh = listouter->firstneigh;
 
-  double cut_in_off = cut_respa[2];
-  double cut_in_on = cut_respa[3];
-
-  double cut_in_diff = cut_in_on - cut_in_off;
-  double cut_in_off_sq = cut_in_off*cut_in_off;
-  double cut_in_on_sq = cut_in_on*cut_in_on;
-
   // loop over neighbors of my atoms
 
   for (ii = 0; ii < inum; ii++) {
@@ -491,7 +464,7 @@ void PairLJCharmmCoulLong14::compute_outer(int eflag, int vflag)
 
     for (jj = 0; jj < jnum; jj++) {
       jo = j = jlist[jj];
-      j &= NEIGHMASK; 
+      j &= NEIGHMASK;
       jtype = type[j];
       factor_lj = special_lj[sbmask(jo)];
       factor_coul = special_coul[sbmask(jo)];
@@ -499,7 +472,7 @@ void PairLJCharmmCoulLong14::compute_outer(int eflag, int vflag)
         this_lj1 = lj14_1;
         this_lj2 = lj14_2;
         this_lj3 = lj14_3;
-        this_lj4 = lj14_4 ;                
+        this_lj4 = lj14_4 ;
         // if this is not true, then the 1-4 interaction are already pre-scaled
         if (!((lj3[itype][jtype]==lj14_3[itype][jtype])&&(lj4[itype][jtype]==lj14_4[itype][jtype])))
           factor_lj = 1.0;
@@ -561,9 +534,9 @@ void PairLJCharmmCoulLong14::compute_outer(int eflag, int vflag)
           forcelj = r6inv * (this_lj1[itype][jtype]*r6inv - this_lj2[itype][jtype]);
           if (rsq > cut_lj_innersq) {
             switch1 = (cut_ljsq-rsq) * (cut_ljsq-rsq) *
-              (cut_ljsq + 2.0*rsq - 3.0*cut_lj_innersq) / denom_lj;
+              (cut_ljsq + 2.0*rsq - 3.0*cut_lj_innersq) * denom_lj_inv;
             switch2 = 12.0*rsq * (cut_ljsq-rsq) *
-              (rsq-cut_lj_innersq) / denom_lj;
+              (rsq-cut_lj_innersq) * denom_lj_inv;
             philj = r6inv * (this_lj3[itype][jtype]*r6inv - this_lj4[itype][jtype]);
             forcelj = forcelj*switch1 + philj*switch2;
           }
@@ -605,7 +578,7 @@ void PairLJCharmmCoulLong14::compute_outer(int eflag, int vflag)
             evdwl = r6inv*(this_lj3[itype][jtype]*r6inv-this_lj4[itype][jtype]);
             if (rsq > cut_lj_innersq) {
               switch1 = (cut_ljsq-rsq) * (cut_ljsq-rsq) *
-                (cut_ljsq + 2.0*rsq - 3.0*cut_lj_innersq) / denom_lj;
+                (cut_ljsq + 2.0*rsq - 3.0*cut_lj_innersq) * denom_lj_inv;
               evdwl *= switch1;
             }
             evdwl *= factor_lj;
@@ -633,19 +606,20 @@ void PairLJCharmmCoulLong14::compute_outer(int eflag, int vflag)
             forcelj = r6inv * (this_lj1[itype][jtype]*r6inv - this_lj2[itype][jtype]);
             if (rsq > cut_lj_innersq) {
               switch1 = (cut_ljsq-rsq) * (cut_ljsq-rsq) *
-                (cut_ljsq + 2.0*rsq - 3.0*cut_lj_innersq) / denom_lj;
+                (cut_ljsq + 2.0*rsq - 3.0*cut_lj_innersq) * denom_lj_inv;
               switch2 = 12.0*rsq * (cut_ljsq-rsq) *
-                (rsq-cut_lj_innersq) / denom_lj;
+                (rsq-cut_lj_innersq) * denom_lj_inv;
               philj = r6inv * (this_lj3[itype][jtype]*r6inv - this_lj4[itype][jtype]);
               forcelj = forcelj*switch1 + philj*switch2;
             }
           } else if (rsq <= cut_in_on_sq) {
+            r6inv = r2inv*r2inv*r2inv;
             forcelj = r6inv * (this_lj1[itype][jtype]*r6inv - this_lj2[itype][jtype]);
             if (rsq > cut_lj_innersq) {
               switch1 = (cut_ljsq-rsq) * (cut_ljsq-rsq) *
-                (cut_ljsq + 2.0*rsq - 3.0*cut_lj_innersq) / denom_lj;
+                (cut_ljsq + 2.0*rsq - 3.0*cut_lj_innersq) * denom_lj_inv;
               switch2 = 12.0*rsq * (cut_ljsq-rsq) *
-                (rsq-cut_lj_innersq) / denom_lj;
+                (rsq-cut_lj_innersq) * denom_lj_inv;
               philj = r6inv * (this_lj3[itype][jtype]*r6inv - this_lj4[itype][jtype]);
               forcelj = forcelj*switch1 + philj*switch2;
             }
@@ -660,9 +634,6 @@ void PairLJCharmmCoulLong14::compute_outer(int eflag, int vflag)
     }
   }
 }
-
-
-/* ---------------------------------------------------------------------- */
 
 /* ----------------------------------------------------------------------
    init specific to this pair style
