@@ -304,6 +304,9 @@ class OutputCapture(object):
 
   def __exit__(self, type, value, tracebac):
     os.dup2(self.stdout, self.stdout_fd)
+    os.close(self.stdout)
+    os.close(self.stdout_pipe_read)
+    os.close(self.stdout_pipe_write)
 
   # check if we have more to read from the pipe
   def more_data(self, pipe):
@@ -345,8 +348,11 @@ class AtomList(object):
   def __init__(self, lammps_wrapper_instance):
     self.lmp = lammps_wrapper_instance
     self.natoms = self.lmp.system.natoms
+    self.dimensions = self.lmp.system.dimensions
 
   def __getitem__(self, index):
+    if self.dimensions == 2:
+        return Atom2D(self.lmp, index + 1)
     return Atom(self.lmp, index + 1)
 
 
@@ -377,6 +383,12 @@ class Atom(object):
             self.lmp.eval("y[%d]" % self.index),
             self.lmp.eval("z[%d]" % self.index))
 
+  @position.setter
+  def position(self, value):
+     self.lmp.set("atom", self.index, "x", value[0])
+     self.lmp.set("atom", self.index, "y", value[1])
+     self.lmp.set("atom", self.index, "z", value[2])
+
   @property
   def velocity(self):
     return (self.lmp.eval("vx[%d]" % self.index),
@@ -392,6 +404,31 @@ class Atom(object):
   @property
   def charge(self):
     return self.lmp.eval("q[%d]" % self.index)
+
+
+class Atom2D(Atom):
+  def __init__(self, lammps_wrapper_instance, index):
+    super(Atom2D, self).__init__(lammps_wrapper_instance, index)
+
+  @property
+  def position(self):
+    return (self.lmp.eval("x[%d]" % self.index),
+            self.lmp.eval("y[%d]" % self.index))
+
+  @position.setter
+  def position(self, value):
+     self.lmp.set("atom", self.index, "x", value[0])
+     self.lmp.set("atom", self.index, "y", value[1])
+
+  @property
+  def velocity(self):
+    return (self.lmp.eval("vx[%d]" % self.index),
+            self.lmp.eval("vy[%d]" % self.index))
+
+  @property
+  def force(self):
+    return (self.lmp.eval("fx[%d]" % self.index),
+            self.lmp.eval("fy[%d]" % self.index))
 
 
 class PyLammps(object):
@@ -438,13 +475,13 @@ class PyLammps(object):
   def system(self):
     output = self.info("system")
     d = self._parse_info_system(output)
-    return namedtuple('System', d.keys())(*d.values())
+    return namedtuple('System', list(d.keys()))(*list(d.values()))
 
   @property
   def communication(self):
     output = self.info("communication")
     d = self._parse_info_communication(output)
-    return namedtuple('Communication', d.keys())(*d.values())
+    return namedtuple('Communication', list(d.keys()))(*list(d.values()))
 
   @property
   def computes(self):

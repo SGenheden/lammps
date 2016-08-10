@@ -24,11 +24,20 @@
 #include "irregular.h"
 #include "domain.h"
 #include "force.h"
+#include "modify.h"
 #include "update.h"
 #include "memory.h"
 #include "error.h"
 #include "group.h"
 #include "timer.h"
+
+#include "imbalance_group.h"
+#include "imbalance_time.h"
+#include "imbalance_neigh.h"
+#include "imbalance_store.h"
+#include "imbalance_var.h"
+
+#include "fix_store.h"
 
 using namespace LAMMPS_NS;
 
@@ -55,11 +64,9 @@ Balance::Balance(LAMMPS *lmp) : Pointers(lmp)
   fp = NULL;
   firststep = 1;
 
-  ngroup = 0;
-  group_id = NULL;
-  group_weight = NULL;
-
-  clock_imbalance = NULL;
+  nimbalance = 0;
+  imbalance = NULL;
+  imb_fix = NULL;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -86,10 +93,11 @@ Balance::~Balance()
   }
 
   delete rcb;
-
-  delete [] group_id;
-  delete [] group_weight;
-  delete [] clock_imbalance;
+  for (int i; i < nimbalance; ++i)
+    delete imbalance[i];
+  delete [] imbalance;
+  if (imb_fix) modify->delete_fix(imb_fix->id);
+  imb_fix = NULL;
 
   if (fp) fclose(fp);
 }
@@ -100,6 +108,8 @@ Balance::~Balance()
 
 void Balance::command(int narg, char **arg)
 {
+  double start_time = MPI_Wtime();
+
   if (domain->box_exist == 0)
     error->all(FLERR,"Balance command before simulation box is defined");
 
@@ -199,10 +209,16 @@ void Balance::command(int narg, char **arg)
     } else break;
   }
 
-  // optional keywords
+  // process optional keywords
 
-  outflag = 0;
+  // get max number of imbalance weight flags/classes
+  nimbalance = 0;
+  for (int i=iarg; i < narg; ++i)
+    if (strcmp(arg[i],"weight") == 0) ++nimbalance;
+  if (nimbalance) imbalance = new Imbalance*[nimbalance];
 
+  nimbalance = outflag = 0;
+  imb_fix = NULL;
   while (iarg < narg) {
     if (strcmp(arg[iarg],"out") == 0) {
       if (iarg+2 > narg) error->all(FLERR,"Illegal balance command");
@@ -213,16 +229,34 @@ void Balance::command(int narg, char **arg)
         if (fp == NULL) error->one(FLERR,"Cannot open balance output file");
       }
       iarg += 2;
-    } else if (strcmp(arg[iarg],"clock") == 0) {
-      if (iarg+2 > narg) error->all(FLERR,"Illegal balance command");
-      double factor = force->numeric(FLERR,arg[iarg+1]);
-      if (factor < 0.0 || factor > 1.0)
-        error->all(FLERR,"Illegal balance command");
-      imbalance_clock(factor,0.0);
-      iarg += 2;
-    } else if (strcmp(arg[iarg],"group") == 0) {
-      group_setup(narg-iarg-1,arg+iarg+1);
-      iarg += 2*ngroup + 2;
+    } else if (strcmp(arg[iarg],"weight") == 0) {
+      Imbalance *imb;
+      int nopt = 0;
+      if (strcmp(arg[iarg+1],"group") == 0) {
+        imb = new ImbalanceGroup(lmp);
+        nopt = imb->options(narg-iarg,arg+iarg+2);
+        imbalance[nimbalance] = imb;
+      } else if (strcmp(arg[iarg+1],"time") == 0) {
+        imb = new ImbalanceTime(lmp);
+        nopt = imb->options(narg-iarg,arg+iarg+2);
+        imbalance[nimbalance] = imb;
+      } else if (strcmp(arg[iarg+1],"neigh") == 0) {
+        imb = new ImbalanceNeigh(lmp);
+        nopt = imb->options(narg-iarg,arg+iarg+2);
+        imbalance[nimbalance] = imb;
+      } else if (strcmp(arg[iarg+1],"var") == 0) {
+        imb = new ImbalanceVar(lmp);
+        nopt = imb->options(narg-iarg,arg+iarg+2);
+        imbalance[nimbalance] = imb;
+      } else if (strcmp(arg[iarg+1],"store") == 0) {
+        imb = new ImbalanceStore(lmp);
+        nopt = imb->options(narg-iarg,arg+iarg+2);
+        imbalance[nimbalance] = imb;
+      } else {
+        error->all(FLERR,"Unknown balance weight method");
+      }
+      ++nimbalance;
+      iarg += 2+nopt;
     } else error->all(FLERR,"Illegal balance command");
   }
 
@@ -274,6 +308,29 @@ void Balance::command(int narg, char **arg)
   comm->setup();
   comm->exchange();
   if (domain->triclinic) domain->lamda2x(atom->nlocal);
+
+  // compute and apply imbalance weights for local atoms
+  if (nimbalance > 0) {
+
+    // add fix property/atom, for storing weights with atoms, if needed.
+    char *fixargs[6];
+
+    fixargs[0] = (char *) "IMBALANCE_WEIGHTS";
+    fixargs[1] = (char *) "all";
+    fixargs[2] = (char *) "STORE";
+    fixargs[3] = (char *) "peratom";
+    fixargs[4] = (char *) "1";
+    fixargs[5] = (char *) "1";
+
+    modify->add_fix(6,fixargs);
+    imb_fix = (FixStore *) modify->fix[modify->nfix-1];
+
+    double * const weight = imb_fix->vstore;
+    for (int i = 0; i < atom->nlocal; ++i)
+      weight[i] = 1.0;
+    for (int n = 0; n < nimbalance; ++n)
+      imbalance[n]->compute(weight);
+  }
 
   // imbinit = initial imbalance
 
@@ -384,27 +441,20 @@ void Balance::command(int narg, char **arg)
   double imbfinal = imbalance_nlocal(maxfinal);
 
   if (me == 0) {
+    double stop_time = MPI_Wtime();
     if (screen) {
+      fprintf(screen,"  rebalancing time: %g seconds\n",stop_time-start_time);
       fprintf(screen,"  iteration count = %d\n",niter);
-      if (ngroup > 0) {
-        fprintf(screen,"  group weights:");
-        for (int i=0; i < ngroup; ++i)
-          fprintf(screen," %s=%g", group->names[group_id[i]],group_weight[i]);
-        fprintf(screen,"\n");
-      }
+      for (int i = 0; i < nimbalance; ++i) imbalance[i]->info(screen);
       fprintf(screen,"  initial/final max load/proc = %d %d\n",
               maxinit,maxfinal);
       fprintf(screen,"  initial/final imbalance factor = %g %g\n",
               imbinit,imbfinal);
     }
     if (logfile) {
+      fprintf(logfile,"  rebalancing time: %g seconds\n",stop_time-start_time);
       fprintf(logfile,"  iteration count = %d\n",niter);
-      if (ngroup > 0) {
-        fprintf(logfile,"  group weights:");
-        for (int i=0; i < ngroup; ++i)
-          fprintf(logfile," %s=%g", group->names[group_id[i]],group_weight[i]);
-        fprintf(logfile,"\n");
-      }
+      for (int i = 0; i < nimbalance; ++i) imbalance[i]->info(logfile);
       fprintf(logfile,"  initial/final max load/proc = %d %d\n",
               maxinit,maxfinal);
       fprintf(logfile,"  initial/final imbalance factor = %g %g\n",
@@ -446,69 +496,6 @@ void Balance::command(int narg, char **arg)
   }
 }
 
- /* ----------------------------------------------------------------------
-    compute the computational load associated with an atom
-    i = atom index
-    return cost = product of group weights for this atom.
-------------------------------------------------------------------------- */
-
-double Balance::getcost(int i)
-{
-   double cost = 1.0;
-   for (int j = 0; j < ngroup; ++j) {
-     if (atom->mask[i] & group->bitmask[group_id[j]])
-       cost *= group_weight[j];
-   }
-   return cost;
-}
-
-/* ----------------------------------------------------------------------
-   calculate imbalance based on timers for Pair+Bond+Kspace+Neighbor time.
-------------------------------------------------------------------------- */
-
-double Balance::imbalance_clock(double factor, double last_cost)
-{
-
-  // Compute the cost function of based on relevant timers
-  if (timer->has_normal()) {
-    if (!clock_imbalance) clock_imbalance = new double[nprocs+1];
-
-    double cost = -last_cost;
-    cost += timer->get_wall(Timer::PAIR);
-    cost += timer->get_wall(Timer::NEIGH);
-    cost += timer->get_wall(Timer::BOND);
-    cost += timer->get_wall(Timer::KSPACE);
-
-    double *clock_cost = new double[nprocs+1];
-    for (int i = 0; i <= nprocs; ++i) clock_imbalance[i] = clock_cost[i] = 0.0;
-    clock_cost[me] = cost;
-    clock_cost[nprocs] = cost;
-    MPI_Allreduce(clock_cost,clock_imbalance,nprocs+1,MPI_DOUBLE,MPI_SUM,world);
-
-    const double avg_cost = clock_imbalance[nprocs]/nprocs;
-    if (avg_cost > 0.0) {
-      for (int i = 0; i < nprocs; ++i)
-        clock_imbalance[i] = (1.0-factor) + factor*clock_imbalance[i]/avg_cost;
-    } else {
-      for (int i = 0; i < nprocs; ++i)
-        clock_imbalance[i] = 1.0;
-    }
-
-#if BALANCE_DEBUG
-    if (me == 0) {
-      fprintf(stderr,"Clock imbalance using factor %g\n",factor);
-      for (int i = 0; i < nprocs; ++i)
-        fprintf(stderr," % 2d: %4.2f",i,clock_imbalance[i]);
-      fputs("\n",stderr);
-    }
-#endif
-
-    delete [] clock_cost;
-    return cost + last_cost;
-  }
-  return last_cost;
-}
-
 /* ----------------------------------------------------------------------
    calculate imbalance based on (weighted) local atom counts
    return max = max atom per proc
@@ -518,15 +505,20 @@ double Balance::imbalance_clock(double factor, double last_cost)
 double Balance::imbalance_nlocal(int &maxcost)
 {
   // Compute the cost function of local atoms
+  const int nlocal = atom->nlocal;
+  int intcost, sumcost;
+  intcost = sumcost = maxcost = 0;
 
-  double cost = 0.0;
-  for (int i=0; i < atom->nlocal; ++i) {
-    cost += getcost(i);
+  if (imb_fix) {
+    const double * const weight = imb_fix->vstore;
+    double cost = 0.0;
+    for (int i=0; i < nlocal; ++i)
+      cost += weight[i];
+
+    intcost = (int)cost;
+  } else {
+    intcost = nlocal;
   }
-  if (clock_imbalance) cost *= clock_imbalance[me];
-
-  int intcost = (int)cost;
-  int sumcost = maxcost = 0;
 
   MPI_Allreduce(&intcost,&maxcost,1,MPI_INT,MPI_MAX,world);
   MPI_Allreduce(&intcost,&sumcost,1,MPI_INT,MPI_SUM,world);
@@ -546,7 +538,7 @@ double Balance::imbalance_nlocal(int &maxcost)
    return imbalance factor = max atom per proc / ave atom per proc
 ------------------------------------------------------------------------- */
 
-double Balance::imbalance_splits(int &max)
+double Balance::imbalance_splits(int &max, const double *weight)
 {
   double *xsplit = comm->xsplit;
   double *ysplit = comm->ysplit;
@@ -563,21 +555,23 @@ double Balance::imbalance_splits(int &max)
   int nlocal = atom->nlocal;
   int ix,iy,iz;
 
-  for (int i = 0; i < nlocal; i++) {
-    ix = binary(x[i][0],nx,xsplit);
-    iy = binary(x[i][1],ny,ysplit);
-    iz = binary(x[i][2],nz,zsplit);
-
-    proccost[iz*nx*ny + iy*nx + ix] += getcost(i);
+  if (weight) {
+    for (int i = 0; i < nlocal; i++) {
+      ix = binary(x[i][0],nx,xsplit);
+      iy = binary(x[i][1],ny,ysplit);
+      iz = binary(x[i][2],nz,zsplit);
+      proccost[iz*nx*ny + iy*nx + ix] += weight[i];
+    }
+  } else {
+    for (int i = 0; i < nlocal; i++) {
+      ix = binary(x[i][0],nx,xsplit);
+      iy = binary(x[i][1],ny,ysplit);
+      iz = binary(x[i][2],nz,zsplit);
+      proccost[iz*nx*ny + iy*nx + ix] += 1.0;
+    }
   }
 
-  for (int i = 0; i < nprocs; i++) {
-    if (clock_imbalance)
-      proccount[i] = static_cast<int>(proccost[i]*clock_imbalance[i]);
-    else
-      proccount[i] = static_cast<int>(proccost[i]);
-  }
-
+  for (int i = 0; i < nprocs; i++) proccount[i] = (int)(proccost[i]);
   MPI_Allreduce(proccount,allproccount,nprocs,MPI_INT,MPI_SUM,world);
   bigint sum = 0;
   max = 0;
@@ -637,20 +631,15 @@ int *Balance::bisection(int sortflag)
   double *shrinklo = &shrinkall[0];
   double *shrinkhi = &shrinkall[3];
 
+  // Use pre-computed weights for each atom, if available
+
+  double * const weight = (imb_fix) ? imb_fix->vstore : NULL;
+
   // invoke RCB
   // then invert() to create list of proc assignements for my atoms
-  // Use specified weightings for each atom rather than atom count
 
-  double factor = 1.0;
-  if (clock_imbalance) factor = clock_imbalance[me];
-
-  double *weights = new double[nlocal];
-  for (int i = 0; i < nlocal; i++)
-    weights[i] = getcost(i)*factor;
-
-  rcb->compute(dim,atom->nlocal,atom->x,weights,shrinklo,shrinkhi);
+  rcb->compute(dim,atom->nlocal,atom->x,weight,shrinklo,shrinkhi);
   rcb->invert(sortflag);
-  delete[] weights;
 
   // reset RCB lo/hi bounding box to full simulation box as needed
 
@@ -760,28 +749,6 @@ void Balance::shift_setup(char *str, int nitermax_in, double thresh_in)
 }
 
 /* ----------------------------------------------------------------------
-   setup group based load balance operations
-   called from balance->command() and fix balance
-------------------------------------------------------------------------- */
-int Balance::group_setup(int narg, char **arg)
-{
-  if (narg < 3) error->all(FLERR,"Illegal balance command");
-
-  ngroup = force->inumeric(FLERR,arg[0]);
-  if (ngroup < 1) error->all(FLERR,"Illegal balance command");
-  if (2*ngroup+1 > narg) error->all(FLERR,"Illegal balance command");
-
-  group_id = new int[ngroup];
-  group_weight = new double[ngroup];
-  for (int i = 0; i < ngroup; ++i) {
-    group_id[i] = group->find(arg[2*i+1]);
-    if (group_id[i] < 0) error->all(FLERR,"Unknown group in balance command");
-    group_weight[i] = force->numeric(FLERR,arg[2*i+2]);
-  }
-  return ngroup;
-}
-
-/* ----------------------------------------------------------------------
    load balance by changing xyz split proc boundaries in Comm
    called one time from input script command or many times from fix balance
    return niter = iteration count
@@ -821,16 +788,21 @@ int Balance::shift()
 
     // intial count and sum
 
+    const double * const weight = (imb_fix) ? imb_fix->vstore : NULL;
+    int intcost, totalcost;
+
     np = procgrid[bdim[idim]];
-    tally(bdim[idim],np,split);
+    tally(bdim[idim],np,split,weight);
 
-    double cost = 0.0;
-    for (i=0; i < atom->nlocal; i++)
-      cost += getcost(i);
+    if (weight) {
+      double cost = 0.0;
+      for (int i=0; i < atom->nlocal; ++i)
+        cost += weight[i];
+      intcost = (int) cost;
+    } else {
+      intcost = atom->nlocal;
+    }
 
-    if (clock_imbalance) cost *= clock_imbalance[me];
-    int intcost = (int)cost;
-    int totalcost;
     MPI_Allreduce(&intcost,&totalcost,1,MPI_INT,MPI_SUM,world);
 
     // target[i] = desired sum at split I
@@ -872,7 +844,7 @@ int Balance::shift()
     int change = 1;
     for (m = 0; m < nitermax; m++) {
       change = adjust(np,split);
-      tally(bdim[idim],np,split);
+      tally(bdim[idim],np,split,weight);
       niter++;
 
 #ifdef BALANCE_DEBUG
@@ -943,7 +915,7 @@ int Balance::shift()
     // stop at this point in bstr if imbalance factor < threshhold
     // this is a true 3d test of particle count per processor
 
-    double imbfactor = imbalance_splits(max);
+    double imbfactor = imbalance_splits(max,weight);
     if (imbfactor <= stopthresh) break;
   }
 
@@ -963,7 +935,7 @@ int Balance::shift()
    use binary search to find which slice each atom is in
 ------------------------------------------------------------------------- */
 
-void Balance::tally(int dim, int n, double *split)
+void Balance::tally(int dim, int n, double *split, const double *weight)
 {
   double *onecost = new double[n];
   for (int i = 0; i < n; i++) onecost[i] = 0.0;
@@ -972,12 +944,16 @@ void Balance::tally(int dim, int n, double *split)
   int nlocal = atom->nlocal;
   int index;
 
-  double factor = 1.0;
-  if (clock_imbalance) factor = clock_imbalance[me];
-
-  for (int i = 0; i < nlocal; i++) {
-    index = binary(x[i][dim],n,split);
-    onecost[index] += getcost(i)*factor;
+  if (weight) {
+    for (int i = 0; i < nlocal; i++) {
+      index = binary(x[i][dim],n,split);
+      onecost[index] += weight[i];
+    }
+  } else {
+    for (int i = 0; i < nlocal; i++) {
+      index = binary(x[i][dim],n,split);
+      onecost[index] += 1.0;
+    }
   }
 
   for (int i = 0; i < n; i++) onecount[i] = static_cast<bigint>(onecost[i]);

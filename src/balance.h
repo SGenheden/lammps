@@ -26,19 +26,22 @@ CommandStyle(balance,Balance)
 namespace LAMMPS_NS {
 
 class Balance : protected Pointers {
+  friend class FixBalance;
+
  public:
-  class RCB *rcb;
 
   Balance(class LAMMPS *);
   ~Balance();
   void command(int, char **);
-  int group_setup(int, char **);
   void shift_setup(char *, int, double);
   int shift();
   int *bisection(int sortflag = 0);
   double imbalance_nlocal(int &);
-  double imbalance_clock(double, double);
   void dumpout(bigint, FILE *);
+
+ protected:
+  class RCB *rcb;
+  void set_imb_fix(class FixStore *fix) { imb_fix = fix; };
 
  private:
   int me,nprocs;
@@ -64,25 +67,22 @@ class Balance : protected Pointers {
   int rho;                   // 0 for geometric recursion
                              // 1 for density weighted recursion
 
-  int *proccount;            // particle count per processor
+  int *proccount;            // (weighted) particle count per processor
   int *allproccount;
 
-  int    ngroup;             // number of groups weights
-  int    *group_id;          // group ids for weights
-  double *group_weight;      // weights of groups
+  int nimbalance;              // number of imbalance weight computes
+  class Imbalance **imbalance; // list of imbalance compute classes
+  class FixStore *imb_fix;     // fix for storing per-atom weights
 
-  double *clock_imbalance;   // computed wall clock imbalance, NULL if not available
-
-  int outflag;               // for output of balance results to file
+  int outflag;                 // for output of balance results to file
   FILE *fp;
   int firststep;
 
-  double imbalance_splits(int &);
+  double imbalance_splits(int &, const double *);
   void shift_setup_static(char *);
-  void tally(int, int, double *);
+  void tally(int, int, double *, const double *);
   int adjust(int, double *);
   int binary(double, int, double *);
-  double getcost(int);
 #ifdef BALANCE_DEBUG
   void debug_shift_output(int, int, int, double *);
 #endif
